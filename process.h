@@ -1,4 +1,4 @@
-// Child processes and small host queries for SSABuild: no shell is involved, arguments are passed as they are.
+// Child processes and small host queries for SkyBuild: no shell is involved, arguments are passed as they are.
 #pragma once
 
 #include <cstdint>

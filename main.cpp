@@ -1,6 +1,6 @@
-// SSABuild: builds the game on the player's machine from their disc and the player kit (docs/tools/ssabuild.md).
+// SkyBuild: builds the game on the player's machine from their disc and the player kit (docs/tools/skybuild.md).
 //
-//   SSABuild --iso <iso or copied game data folder> --out <game dir> [--kit <kit dir>] [--jobs N] [--toolchain <dir>]
+//   SkyBuild --iso <iso or copied game data folder> --out <game dir> [--kit <kit dir>] [--jobs N] [--toolchain <dir>]
 //
 // The kit holds several games (kit.txt: games=ssa,giants). The disc's default.xex, by its SHA-256, says which one this
 // is (config/<id>/game.txt); everything below then comes from that game's part of the kit.
@@ -12,6 +12,7 @@
 // of the new game that saves the shaders it builds at run time (Bink movies) and a rebuild of the shader cache with
 // them. Work files stay in <game dir>/ssabuild-work, so a rerun only redoes what changed.
 #include "host/collection/datadir.h"
+#include "host/art/ico.h"
 #include "host/xex_title.h"
 #include "igz_shaders.h"
 #include "process.h"
@@ -32,7 +33,7 @@
 
 namespace
 {
-    // The compiler SSABuild downloads: the one the kit's runtime was built with (tools/make_kit.sh), pinned by SHA-256.
+    // The compiler SkyBuild downloads: the one the kit's runtime was built with (tools/make_kit.sh), pinned by SHA-256.
     struct Toolchain
     {
         const char* name;
@@ -51,7 +52,7 @@ namespace
     constexpr const char* Exe = ".exe";
 #elif defined(__linux__)
     // zig's clang with its own libc++ and glibc stubs: no system compiler, headers or -dev package is needed, and
-    // the game targets glibc 2.34 whatever the distribution (docs/tools/ssabuild.md). The kit records the same version.
+    // the game targets glibc 2.34 whatever the distribution (docs/tools/skybuild.md). The kit records the same version.
     constexpr const char* ZigVersion = "0.17.0";
     constexpr Toolchain Compiler = { "zig 0.17.0", "zig-x86_64-linux-0.17.0",
         "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz",
@@ -205,8 +206,8 @@ namespace
                                          // or "igz:<path of the archive>" (IGA v8 / IGZ v6 or IGA v10 / IGZ v7, extracted here)
         std::vector<std::string> xexSha256; // the accepted default.xex files
         // The movie pass (AddMovieShaders); empty: no portal, no presses, it ends 8 s after the first new shader.
-        std::string moviePortal;         // SSA_PORTAL for the run ("emulated": an empty emulated portal)
-        std::string moviePress;          // SSA_PRESS for the run (presses through the menus)
+        std::string moviePortal;         // SKY_PORTAL for the run ("emulated": an empty emulated portal)
+        std::string moviePress;          // SKY_PRESS for the run (presses through the menus)
         unsigned movieShaders = 0;       // the run ends once this many new shaders are dumped
     };
 
@@ -429,7 +430,7 @@ namespace
         }
 #ifdef __linux__
         if (build.kit["zig"] != ZigVersion)
-            Fail("the kit was built with zig " + build.kit["zig"] + ", this SSABuild uses " + ZigVersion);
+            Fail("the kit was built with zig " + build.kit["zig"] + ", this SkyBuild uses " + ZigVersion);
         fs::path cache = build.options.toolchain;
         fs::path root;
         if (!cache.empty() && fs::exists(cache / Compiler.compiler))
@@ -625,7 +626,7 @@ namespace
         }
 
         if (build.cross)
-            Fail("a cross build reuses ppc/ and the shader cache of a native run (docs/tools/ssabuild.md)");
+            Fail("a cross build reuses ppc/ and the shader cache of a native run (docs/tools/skybuild.md)");
         // XenonRecomp reads its paths relative to the TOML (../private/default.xex, ../ppc): lay it out that way, with
         // relative paths only (its file APIs may not take UTF-8).
         fs::path xenon = build.work / "xenon";
@@ -704,7 +705,7 @@ namespace
             return;
         }
         if (build.cross)
-            Fail("a cross build reuses ppc/ and the shader cache of a native run (docs/tools/ssabuild.md)");
+            Fail("a cross build reuses ppc/ and the shader cache of a native run (docs/tools/skybuild.md)");
         fs::remove(stamp);
         fs::copy_file(build.options.kit / "share" / "shader_common.h", shaders / "shader_common.h",
             fs::copy_options::overwrite_existing);
@@ -781,7 +782,7 @@ namespace
 
     // --- compile and link ------------------------------------------------------------------------------------------
 
-    // zig's copies of what it just built (Linux): SSABuild keeps its own objects in obj/.
+    // zig's copies of what it just built (Linux): SkyBuild keeps its own objects in obj/.
     void ClearCompilerCache(const Build& build)
     {
         std::error_code error;
@@ -973,6 +974,43 @@ namespace
         return icns;
     }
 
+    // Windows: the game's own icon in the executable, the title icon of default.xex as an .ico (one PNG entry, ico.h) that
+    // windres (llvm-mingw's) turns into an object linked with the game. Returns the object's path relative to the build
+    // folder, or "" when the disc has no icon or a tool fails: the executable then has none, as before.
+    std::string ExecutableIcon(const Build& build)
+    {
+        fs::path dir = build.work / "icon";
+        fs::path object = dir / "game_icon.o";
+        fs::path xex = build.work / "disc" / "default.xex";
+        std::error_code error;
+        if (fs::exists(object) && fs::last_write_time(object, error) >= fs::last_write_time(xex, error))
+            return "icon/game_icon.o";
+        std::string bytes = ReadText(xex);
+        TitleMetadata title = ReadTitleMetadata(std::vector<uint8_t>(bytes.begin(), bytes.end()));
+        std::vector<uint8_t> ico = MakeIco(title.iconPng);
+        if (ico.empty())
+        {
+            Log("icon: default.xex has no title icon, the executable gets none");
+            return "";
+        }
+        fs::create_directories(dir);
+        WriteBytes(dir / "game_icon.ico", ico.data(), ico.size());
+        std::string rc = "1 ICON \"game_icon.ico\"\n";
+        WriteBytes(dir / "game_icon.rc", rc.data(), rc.size());
+        fs::path windres = fs::path(build.vars.at("CXX")).parent_path() / (std::string("x86_64-w64-mingw32-windres") + Exe);
+        RunOptions run;
+        run.cwd = dir;
+        run.log = build.work / "logs" / "icon.log";
+        if (Run({ Slashes(windres), "-O", "coff", "-o", "game_icon.o", "game_icon.rc" }, run) != 0 || !fs::exists(object))
+        {
+            LogTail(run.log);
+            Log("icon: could not embed the game's icon, the executable gets none");
+            return "";
+        }
+        Log("icon: the game's own, from default.xex");
+        return "icon/game_icon.o";
+    }
+
     void Link(Build& build)
     {
         Step("link", "Linking the game");
@@ -999,6 +1037,9 @@ namespace
         }
         build.vars["OUT"] = Slashes(build.exe);
         std::vector<std::string> objects = ObjectList(build);
+        if (build.platform == "windows-x64")
+            if (std::string icon = ExecutableIcon(build); !icon.empty())
+                objects.push_back(icon);
         // The link is fresh when its command (the kit's folder aside) and the content of the kit's libraries are the same.
         std::vector<std::string> command = ExpandTemplate(build, "link.args", objects);
         std::string key = CommandText(build, command);
@@ -1064,7 +1105,7 @@ namespace
     }
 
     // The game builds the Bink movie shaders at run time (they are in no archive): run it headless for a few seconds
-    // with SSA_DUMP_SHADERS, keep the containers the cache lacks, then rebuild the cache with them.
+    // with SKY_DUMP_SHADERS, keep the containers the cache lacks, then rebuild the cache with them.
     bool AddMovieShaders(Build& build)
     {
         Step("movies", "Adding the movie shaders");
@@ -1101,18 +1142,18 @@ namespace
         };
 
         // Nothing of the player's: no settings file, scratch data folder, log, saves and collection, no portal, no sound,
-        // no window (SKYLANDERS_DATA moves every folder the game writes, SSA_LOG its log). Test
+        // no window (SKYLANDERS_DATA moves every folder the game writes, SKY_LOG its log). Test
         // variables a launcher may pass on (screenshots, skipped movies, presses) are removed ("": unset). A game whose
         // run-time shaders come later (game.txt: Swap Force's loading screen, after the menus) gets an empty emulated
         // portal (without one it stops at "PORTAL DISCONNECTED") and presses.
         const Game& game = build.game;
         const std::string portal = game.moviePortal.empty() ? "none" : game.moviePortal;
         const std::pair<const char*, const char*> environment[] = {
-            { "SSA_HEADLESS", "1" }, { "SSA_DUMP_SHADERS", "dump" }, { "SSA_SETTINGS", "settings.ini" },
-            { "SSA_SAVE_DIR", "saves" }, { "SSA_COLLECTION", "collection" }, { "SSA_PORTAL", portal.c_str() },
-            { "SSA_PORTAL_PLACE", "" }, { "SDL_AUDIO_DRIVER", "dummy" }, { "SSA_LAUNCHER_SHOTS", "" },
-            { "SSA_SKIP_MOVIES", "" }, { "SSA_PRESS", game.moviePress.c_str() },
-            { "SKYLANDERS_DATA", "data" }, { "SSA_LAUNCHER_INI", "none.ini" }, { "SSA_LOG", "runtime.log" } };
+            { "SKY_HEADLESS", "1" }, { "SKY_DUMP_SHADERS", "dump" }, { "SKY_SETTINGS", "settings.ini" },
+            { "SKY_SAVE_DIR", "saves" }, { "SKY_COLLECTION", "collection" }, { "SKY_PORTAL", portal.c_str() },
+            { "SKY_PORTAL_PLACE", "" }, { "SDL_AUDIO_DRIVER", "dummy" }, { "SKY_LAUNCHER_SHOTS", "" },
+            { "SKY_SKIP_MOVIES", "" }, { "SKY_PRESS", game.moviePress.c_str() },
+            { "SKYLANDERS_DATA", "data" }, { "SKY_LAUNCHER_INI", "none.ini" }, { "SKY_LOG", "runtime.log" } };
         std::vector<std::string> previous; // the caller's values, put back after the run
         for (const auto& [name, value] : environment)
         {
@@ -1164,7 +1205,7 @@ namespace
 
     void Usage()
     {
-        fprintf(stderr, "usage: SSABuild --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
+        fprintf(stderr, "usage: SkyBuild --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
             "[--toolchain <dir>]\n");
     }
 }
@@ -1241,7 +1282,7 @@ int main(int argc, char** argv)
         fs::create_directories(build.work / "logs");
         build.vars["KIT"] = Slashes(options.kit);
         build.vars["PPC"] = "ppc";
-        Log("SSABuild " + build.kit["version"] + " (" + build.kit["build"] + ", " + build.platform + "), kit " +
+        Log("SkyBuild " + build.kit["version"] + " (" + build.kit["build"] + ", " + build.platform + "), kit " +
             Slashes(options.kit));
 
         std::error_code error;

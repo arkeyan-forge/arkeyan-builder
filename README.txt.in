@@ -2,19 +2,19 @@ SSARecomp player kit (@PLATFORM@)
 =================================
 
 This kit builds SSARecomp, a native port of Skylanders: Spyro's Adventure, SGRecomp, the one of Skylanders: Giants,
-and SSFRecomp, the one of Skylanders: Swap Force (all Xbox 360), on your own machine from your own disc image; SSABuild recognises which game the disc is. It contains no game code and no game file: the game's code and shaders are translated from
+and SSFRecomp, the one of Skylanders: Swap Force (all Xbox 360), on your own machine from your own disc image; SkyBuild recognises which game the disc is. It contains no game code and no game file: the game's code and shaders are translated from
 your disc here, and the result is for your own use only. Never share the built game or its work folder.
 
-Normally Skylauncher runs SSABuild for you. By hand:
+Normally Skylauncher runs SkyBuild for you. By hand:
 
-    SSABuild --iso <your disc .iso> --out <game folder> [--jobs N] [--toolchain <folder>]
+    SkyBuild --iso <your disc .iso> --out <game folder> [--jobs N] [--toolchain <folder>]
 
 It prints one event per line (@step, @progress, @log, @error, @done) and ends with "@done <path of the game>".
 A second run only redoes what changed. Work files stay in <game folder>/ssabuild-work (about 2-3 GB; delete it
 once the game runs if you need the space, the next build will then start over).
 
 Windows 10 (1903 or later) or 11, x64:
-- internet for the first build: SSABuild downloads the llvm-mingw 20260922 compiler (190 MB, from
+- internet for the first build: SkyBuild downloads the llvm-mingw 20260922 compiler (190 MB, from
   github.com/mstorsjo/llvm-mingw, checked against its SHA-256) into %APPDATA%\Skylanders\toolchains
   (about 750 MB once extracted) with the curl.exe and tar.exe that Windows ships;
 - about 5 GB free next to the game folder, 8 GB of RAM or more;
@@ -24,7 +24,7 @@ Windows 10 (1903 or later) or 11, x64:
 macOS (Apple silicon): Xcode with its Metal toolchain (xcodebuild -downloadComponent MetalToolchain on Xcode 26+).
 
 Linux, x86_64 (Ubuntu 22.04 or later, Fedora, Arch, SteamOS 3.5 or later on the Steam Deck; glibc 2.34 or later):
-- no root and no development package: SSABuild downloads the zig 0.17.0 compiler (55 MB, from ziglang.org, checked
+- no root and no development package: SkyBuild downloads the zig 0.17.0 compiler (55 MB, from ziglang.org, checked
   against its SHA-256) into ~/.local/share/Skylanders/toolchains (about 410 MB once extracted, plus about 100 MB the first
   build adds there) with curl (or wget), tar and xz, which every desktop has; the shader compiler (dxc) needs
   libstdc++ (GCC 11 or later) and zlib, also on every desktop;
@@ -39,7 +39,7 @@ Linux, x86_64 (Ubuntu 22.04 or later, Fedora, Arch, SteamOS 3.5 or later on the 
   then unplug the portal and plug it in again. Without it the game's log says "Linux needs this udev rule".
 
 In this kit:
-- SSABuild: the build driver; bin/XenonRecomp and bin/XenosRecomp: the code and shader translators (separate
+- SkyBuild: the build driver; bin/XenonRecomp and bin/XenosRecomp: the code and shader translators (separate
   programs); dxc (DirectX Shader Compiler) next to XenosRecomp (libdxcompiler.so on Linux);
 - lib/, include/, commands/: the prebuilt runtime (everything but the game code) and how to compile and link against it;
 - config/: XenonRecomp's settings for this game; res/: fonts and notices copied next to the game;
@@ -49,7 +49,7 @@ In this kit:
 
 ---
 FR : ce kit construit le jeu sur votre machine à partir de votre propre ISO. Il ne contient rien du jeu.
-Skylauncher lance SSABuild tout seul ; à la main : SSABuild --iso <ISO> --out <dossier du jeu>.
+Skylauncher lance SkyBuild tout seul ; à la main : SkyBuild --iso <ISO> --out <dossier du jeu>.
 Windows : il faut Internet au premier lancement (téléchargement du compilateur, 190 Mo), ~5 Go libres, et
 15 à 45 min pour la première construction. Linux : le compilateur zig (55 Mo) est téléchargé, sans sudo ;
 le portail demande une fois la règle udev ci-dessus. Ne partagez jamais le jeu construit.

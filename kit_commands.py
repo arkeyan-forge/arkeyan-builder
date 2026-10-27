@@ -3,11 +3,11 @@
     python3 -I kit_commands.py <game id> <runtime build dir> <stub ppc dir> <kit dir>
 
 Run once per game of the kit (docs/release/launcher/kit_contract.md). The commands are the ones CMake/Ninja would run, with the
-build machine's paths replaced by ${KIT}, ${CXX}, ${SDK}, ${PPC}, ${SRC}, ${OBJ}, ${OUT} and ${OBJECTS} (SSABuild). They go to
+build machine's paths replaced by ${KIT}, ${CXX}, ${SDK}, ${PPC}, ${SRC}, ${OBJ}, ${OUT} and ${OBJECTS} (SkyBuild). They go to
 commands/<game>/. The SSARecomp target's own objects are compiled against the game's ppc_config.h, so they are the game's:
 lib/<game>/runtime/. The static libraries (SDL, plume, FFmpeg, ...) are the same for every game: lib/ holds one copy, shared
 (a library that differs between games would go to lib/<game>/ and the game's link.args would name it there). The game code
-library and the shader cache library are left out (SSABuild compiles them from the player's disc and passes them as
+library and the shader cache library are left out (SkyBuild compiles them from the player's disc and passes them as
 ${OBJECTS}).
 """
 import filecmp
