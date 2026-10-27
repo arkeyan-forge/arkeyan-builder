@@ -142,6 +142,23 @@ namespace
             Log(all[i]);
     }
 
+    // A digest of the content of a file or of every file under a folder (names and bytes, in name order): what decides
+    // whether a result is still valid, where a time or a path would change with each unpacked kit.
+    std::string ContentDigest(const fs::path& path)
+    {
+        std::error_code error;
+        if (fs::is_regular_file(path, error))
+            return Sha256File(path);
+        std::map<std::string, std::string> files;
+        for (const auto& entry : fs::recursive_directory_iterator(path, error))
+            if (entry.is_regular_file(error))
+                files[Slashes(fs::relative(entry.path(), path))] = Sha256File(entry.path());
+        std::string text;
+        for (const auto& [name, sha] : files)
+            text += name + "=" + sha + "\n";
+        return Sha256Text(text);
+    }
+
     // Copies when the content differs, so unchanged files keep their time (and their objects stay valid).
     bool CopyIfDifferent(const fs::path& from, const fs::path& to)
     {
@@ -218,6 +235,20 @@ namespace
 
     // Per-game folder of a kit part: <kit>/<part>/<game id>/.
     fs::path GameDir(const Build& build, const char* part) { return build.options.kit / part / build.game.id; }
+
+    // A command line as the freshness key sees it: the kit's folder (a new one for every update) written as <kit>.
+    std::string CommandText(const Build& build, const std::vector<std::string>& args)
+    {
+        const std::string kit = Slashes(build.options.kit);
+        std::string text;
+        for (std::string arg : args)
+        {
+            for (size_t at = arg.find(kit); at != std::string::npos; at = arg.find(kit, at + 5))
+                arg.replace(at, kit.size(), "<kit>");
+            text += arg + "\n";
+        }
+        return text;
+    }
 
     fs::file_time_type TimeOf(const fs::path& path)
     {
@@ -454,7 +485,7 @@ namespace
         auto time = std::chrono::duration_cast<std::chrono::seconds>(
             fs::last_write_time(stamped, error).time_since_epoch()).count();
         return "game=" + build.game.id + "\niso=" + Slashes(fs::absolute(build.options.iso)) + "\nsize=" + std::to_string(size) + "\ntime=" +
-            std::to_string(static_cast<long long>(time)) + "\nkit=" + build.kit.at("build") + "\n";
+            std::to_string(static_cast<long long>(time)) + "\n";
     }
 
     // The kit's games and which one the disc is: default.xex's SHA-256 against every config/<id>/game.txt. An unknown
@@ -574,7 +605,19 @@ namespace
         Step("recompile", "Translating the game code");
         fs::path ppc = build.work / "ppc";
         fs::path stamp = ppc / "stamp.txt";
-        std::string expected = DiscStamp(build) + "config=" + Sha256File(GameDir(build, "config") / build.game.toml) + "\n";
+        // What the translation depends on: the disc, XenonRecomp itself, its config and the context header it is given,
+        // and the headers the kit's runtime expects. Not the kit's build or folder: a runtime-only update keeps ppc/.
+        std::map<std::string, std::string> files;
+        for (const auto& entry : fs::directory_iterator(GameDir(build, "config")))
+            if (entry.path().filename() != "game.txt")
+                files[Slashes(entry.path().filename())] = Sha256File(entry.path());
+        std::string config;
+        for (const auto& [name, sha] : files)
+            config += name + "=" + sha + ",";
+        std::string expected = DiscStamp(build) + "config=" + Sha256Text(config) + "\ntranslator=" +
+            Sha256File(build.options.kit / "bin" / (std::string("XenonRecomp") + Exe)) + "\ncontext=" +
+            Sha256File(build.options.kit / "share" / "ppc_context.h") + "\nkit_config=" +
+            build.kit["ppc_config_sha256." + build.game.id] + "\nkit_context=" + build.kit["ppc_context_sha256"] + "\n";
         if (ReadText(stamp) == expected)
         {
             Log("up to date");
@@ -650,7 +693,11 @@ namespace
         fs::path shaders = build.work / "shaders";
         fs::path stamp = shaders / "stamp.txt";
         fs::path cache = build.work / "ppc" / "shader_cache.cpp";
-        std::string expected = DiscStamp(build) + "runtime=" + RuntimeShaderList(build) + "\n";
+        // The translator and shader_common.h decide the translated text; the compiled results are kept by the text's
+        // hash (below), so a new translator redoes the translation but only compiles what changed.
+        fs::path xenos = build.options.kit / "bin" / (std::string("XenosRecomp") + Exe);
+        std::string expected = DiscStamp(build) + "runtime=" + RuntimeShaderList(build) + "\ntranslator=" + Sha256File(xenos) +
+            "\ncommon=" + Sha256File(build.options.kit / "share" / "shader_common.h") + "\n";
         if (ReadText(stamp) == expected && fs::exists(cache))
         {
             Log("up to date");
@@ -662,11 +709,21 @@ namespace
         fs::copy_file(build.options.kit / "share" / "shader_common.h", shaders / "shader_common.h",
             fs::copy_options::overwrite_existing);
 
-        // The shaders translated by this XenosRecomp stay in shaders/cache: the movie pass translates only the new ones.
-        // They are valid for this program only (and for the same shader_common.h, which XenosRecomp checks itself).
-        fs::path xenos = build.options.kit / "bin" / (std::string("XenosRecomp") + Exe);
+        // The compiled shaders stay in shaders/cache, keyed by the hash of their translated text (XenosRecomp): the movie
+        // pass and a game update with a new translator compile only the shaders whose text is new. They are valid for
+        // the same compilers only: the kit's DXC libraries (XenosRecomp checks shader_common.h itself).
         fs::path cacheStamp = shaders / "cache.txt";
-        std::string cacheId = Sha256File(xenos) + "\n";
+        std::map<std::string, std::string> tools;
+        for (const auto& entry : fs::directory_iterator(build.options.kit / "bin"))
+        {
+            std::string file = Slashes(entry.path().filename());
+            if (file.find("XenonRecomp") == std::string::npos && file.find("XenosRecomp") == std::string::npos)
+                tools[file] = Sha256File(entry.path());
+        }
+        std::string compilers;
+        for (const auto& [name, sha] : tools)
+            compilers += name + "=" + sha + ",";
+        std::string cacheId = "compilers=" + Sha256Text(compilers) + "\n";
         if (ReadText(cacheStamp) != cacheId)
         {
             std::error_code error;
@@ -741,8 +798,10 @@ namespace
         return objects;
     }
 
-    // Compiles every ppc/*.cpp whose object is missing or older than it (or than a ppc/ header), or whose command
-    // changed.
+    // Compiles every ppc/*.cpp whose object is missing, older than it, or made by another command or with other headers.
+    // "Other" is decided by content: the command line with the kit's folder written as <kit>, and a digest of the
+    // ppc/ headers and of the kit's include/ (an update unpacks the kit in a new folder with new file times, and its
+    // headers are mostly the same).
     void Compile(Build& build)
     {
         Step("compile", "Compiling the game");
@@ -750,21 +809,26 @@ namespace
         fs::path obj = build.work / "obj";
         fs::create_directories(obj);
 
-        auto headers = fs::file_time_type::min();
+        std::map<std::string, std::string> headerFiles;
         std::vector<fs::path> sources;
         for (const auto& entry : fs::directory_iterator(ppc))
         {
             if (entry.path().extension() == ".h")
-                headers = std::max(headers, entry.last_write_time());
+                headerFiles[Slashes(entry.path().filename())] = Sha256File(entry.path());
             else if (entry.path().extension() == ".cpp")
                 sources.push_back(entry.path());
         }
+        std::string headers = "include=" + ContentDigest(build.options.kit / "include") + "\n";
+        for (const auto& [name, sha] : headerFiles)
+            headers += name + "=" + sha + "\n";
 
         struct Job
         {
             fs::path source;
             std::vector<std::string> args;
             uintmax_t size;
+            fs::path keyFile;
+            std::string key;
         };
         std::vector<Job> jobs;
         for (const fs::path& source : sources)
@@ -775,15 +839,16 @@ namespace
             bool cache = name == "shader_cache";
             std::vector<std::string> args = ExpandTemplate(build, cache ? "shader_cache.args" : "compile.args", {});
             fs::path rsp = obj / (name + ".rsp");
+            fs::path keyFile = obj / (name + ".key");
             fs::path object = obj / (name + ".o");
-            std::string before = ReadText(rsp);
+            std::string key = Sha256Text(CommandText(build, args) + headers);
             args = WithResponseFile(args, rsp);
-            bool fresh = !before.empty() && ReadText(rsp) == before && fs::exists(object) &&
-                TimeOf(object) >= TimeOf(source) && (cache || TimeOf(object) >= headers);
+            bool fresh = ReadText(keyFile) == key && fs::exists(object) && TimeOf(object) >= TimeOf(source);
             if (!fresh)
             {
                 fs::remove(object);
-                jobs.push_back({ source, args, fs::file_size(source) });
+                fs::remove(keyFile);
+                jobs.push_back({ source, args, fs::file_size(source), keyFile, key });
             }
         }
         build.vars.erase("SRC");
@@ -835,6 +900,7 @@ namespace
                     }
                     std::error_code error;
                     fs::remove(run.log, error);
+                    WriteText(job.keyFile, job.key);
                     Progress(++finished, total);
                 }
             });
@@ -933,10 +999,20 @@ namespace
         }
         build.vars["OUT"] = Slashes(build.exe);
         std::vector<std::string> objects = ObjectList(build);
-        std::string before = ReadText(build.work / "link.rsp");
-        std::vector<std::string> args = WithResponseFile(ExpandTemplate(build, "link.args", objects),
-            build.work / "link.rsp");
-        bool fresh = fs::exists(build.exe) && ReadText(build.work / "link.rsp") == before;
+        // The link is fresh when its command (the kit's folder aside) and the content of the kit's libraries are the same.
+        std::vector<std::string> command = ExpandTemplate(build, "link.args", objects);
+        std::string key = CommandText(build, command);
+        const std::string kitPrefix = Slashes(build.options.kit);
+        for (const std::string& arg : command)
+        {
+            std::error_code error;
+            if (arg.rfind(kitPrefix, 0) == 0 && fs::is_regular_file(PathFromUtf8(arg.c_str()), error))
+                key += Sha256File(PathFromUtf8(arg.c_str())) + "\n";
+        }
+        key = Sha256Text(key);
+        fs::path linkKey = build.work / "link.key";
+        std::vector<std::string> args = WithResponseFile(command, build.work / "link.rsp");
+        bool fresh = fs::exists(build.exe) && ReadText(linkKey) == key;
         for (const std::string& object : objects)
             fresh = fresh && TimeOf(build.work / object) <= TimeOf(build.exe);
         if (fresh)
@@ -945,6 +1021,7 @@ namespace
             return;
         }
 
+        fs::remove(linkKey);
         RunOptions run;
         run.cwd = build.work;
         run.log = build.work / "logs" / "link.log";
@@ -965,6 +1042,7 @@ namespace
                 Fail("codesign failed");
             }
         }
+        WriteText(linkKey, key);
         Log(Slashes(build.exe) + ": " + std::to_string(fs::file_size(build.exe) >> 20) + " MB");
     }
 
