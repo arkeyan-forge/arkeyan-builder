@@ -14,6 +14,8 @@
 #include "host/collection/datadir.h"
 #include "host/art/ico.h"
 #include "host/xex_title.h"
+#include "game_icon.h"
+#include "host/art/game_art.h"
 #include "igz_shaders.h"
 #include "process.h"
 #include "sha256.h"
@@ -193,6 +195,7 @@ namespace
         fs::path kit;
         fs::path toolchain;
         unsigned jobs = 0;
+        bool iconOnly = false; // --icon-only: make the game's icon (GameIcon) and stop; a check, no build
     };
 
     // One game of the kit: config/<id>/game.txt.
@@ -926,30 +929,71 @@ namespace
         }
     }
 
-    // macOS: the game's own icon, made from the dashboard icon of the player's default.xex (a PNG in its XDBF resource), as
-    // the bundle's .icns (sips scales it, iconutil packs it). Returns the kit's neutral icon when the disc has no icon or
-    // a tool fails: the bundle always has one.
+    // The game's icon: its disc title logo, cut to its visible pixels and fitted centred into a transparent square (the same
+    // for every game: art::ReadLogo knows where each keeps its logo, FitLogoIcon), as game_icon.png (512 px) in the game's
+    // folder, which the window icon and Skylauncher's shortcuts load. A copy of 256 px is for the Windows .ico (MakeIco).
+    // When the disc has no readable logo, the dashboard icon of default.xex is used as it is. Returns the PNG's path, or ""
+    // when there is no icon at all. Kept while the disc and this version of the recipe are the same.
+    struct GameIconFiles
+    {
+        fs::path png, icoPng;
+    };
+
+    GameIconFiles GameIcon(const Build& build)
+    {
+        fs::path dir = build.work / "icon";
+        GameIconFiles files{ build.options.out / "game_icon.png", dir / "game_icon_256.png" };
+        fs::path keyFile = dir / "game_icon.key";
+        std::string key = DiscStamp(build) + "recipe=1\n";
+        if (fs::exists(files.png) && fs::exists(files.icoPng) && ReadText(keyFile) == key)
+            return files;
+        fs::create_directories(dir);
+        DiscFileSystem fileSystem;
+        if (!fileSystem.Open(Slashes(build.options.iso).c_str()))
+            Fail("not an Xbox 360 disc image: " + Slashes(build.options.iso));
+        std::vector<uint8_t> big, small;
+        art::Image logo;
+        if (art::ReadLogo(build.game.id, art::ReadFrom(fileSystem), logo))
+        {
+            big = FitLogoIcon(logo, 512);
+            small = FitLogoIcon(logo, 256);
+        }
+        if (big.empty() || small.empty())
+        {
+            std::vector<uint8_t> xex = fileSystem.ReadAll("default.xex");
+            big = small = ReadTitleMetadata(xex).iconPng;
+            Log(big.empty() ? "icon: no logo and no title icon on the disc" : "icon: no readable logo, using the title icon of default.xex");
+        }
+        else
+            Log("icon: the game's logo, fitted into a square");
+        if (big.empty())
+            return {};
+        fs::create_directories(build.options.out);
+        WriteBytes(files.png, big.data(), big.size());
+        WriteBytes(files.icoPng, small.data(), small.size());
+        WriteText(keyFile, key);
+        return files;
+    }
+
+    // macOS: the game's icon as the bundle's .icns (sips scales game_icon.png, iconutil packs it). Returns the kit's neutral
+    // icon when there is no icon or a tool fails: the bundle always has one.
     fs::path BundleIcon(const Build& build)
     {
         fs::path neutral = build.options.kit / "res" / "SSARecomp.icns";
         fs::path dir = build.work / "icon";
         fs::path icns = dir / "SSARecomp.icns";
-        fs::path xex = build.work / "disc" / "default.xex";
-        std::error_code error;
-        if (fs::exists(icns) && fs::last_write_time(icns, error) >= fs::last_write_time(xex, error))
-            return icns;
-        std::string bytes = ReadText(xex);
-        TitleMetadata title = ReadTitleMetadata(std::vector<uint8_t>(bytes.begin(), bytes.end()));
-        if (title.iconPng.empty())
+        GameIconFiles files = GameIcon(build);
+        if (files.png.empty())
         {
-            Log("icon: default.xex has no title icon, using the kit's");
+            Log("icon: the disc has no icon, using the kit's");
             return neutral;
         }
+        std::error_code error;
+        if (fs::exists(icns) && fs::last_write_time(icns, error) >= fs::last_write_time(files.png, error))
+            return icns;
         fs::path set = dir / "SSARecomp.iconset";
         fs::remove_all(set, error);
         fs::create_directories(set);
-        fs::path png = dir / "title_icon.png";
-        WriteBytes(png, title.iconPng.data(), title.iconPng.size());
         RunOptions run;
         run.log = build.work / "logs" / "icon.log";
         bool ok = true;
@@ -960,7 +1004,7 @@ namespace
             {
                 std::string pixels = std::to_string(points * scale);
                 std::string name = "icon_" + std::to_string(points) + "x" + std::to_string(points) + (scale == 2 ? "@2x" : "") + ".png";
-                ok = ok && Run({ "sips", "-z", pixels, pixels, Slashes(png), "--out", Slashes(set / name) }, run) == 0;
+                ok = ok && Run({ "sips", "-z", pixels, pixels, Slashes(files.png), "--out", Slashes(set / name) }, run) == 0;
             }
         }
         ok = ok && Run({ "iconutil", "-c", "icns", "-o", Slashes(icns), Slashes(set) }, run) == 0;
@@ -970,30 +1014,33 @@ namespace
             Log("icon: could not make the game's icon, using the kit's");
             return neutral;
         }
-        Log("icon: the game's own, from default.xex");
+        Log("icon: the game's own");
         return icns;
     }
 
-    // Windows: the game's own icon in the executable, the title icon of default.xex as an .ico (one PNG entry, ico.h) that
-    // windres (llvm-mingw's) turns into an object linked with the game. Returns the object's path relative to the build
-    // folder, or "" when the disc has no icon or a tool fails: the executable then has none, as before.
+    // Windows: the game's icon in the executable, game_icon_256.png as an .ico (one PNG entry, ico.h) that windres
+    // (llvm-mingw's) turns into an object linked with the game. Returns the object's path relative to the build folder, or
+    // "" when there is no icon or a tool fails: the executable then has none, as before.
     std::string ExecutableIcon(const Build& build)
     {
         fs::path dir = build.work / "icon";
         fs::path object = dir / "game_icon.o";
-        fs::path xex = build.work / "disc" / "default.xex";
-        std::error_code error;
-        if (fs::exists(object) && fs::last_write_time(object, error) >= fs::last_write_time(xex, error))
-            return "icon/game_icon.o";
-        std::string bytes = ReadText(xex);
-        TitleMetadata title = ReadTitleMetadata(std::vector<uint8_t>(bytes.begin(), bytes.end()));
-        std::vector<uint8_t> ico = MakeIco(title.iconPng);
-        if (ico.empty())
+        GameIconFiles files = GameIcon(build);
+        if (files.png.empty())
         {
-            Log("icon: default.xex has no title icon, the executable gets none");
+            Log("icon: the disc has no icon, the executable gets none");
             return "";
         }
-        fs::create_directories(dir);
+        std::error_code error;
+        if (fs::exists(object) && fs::last_write_time(object, error) >= fs::last_write_time(files.icoPng, error))
+            return "icon/game_icon.o";
+        std::string bytes = ReadText(files.icoPng);
+        std::vector<uint8_t> ico = MakeIco(std::vector<uint8_t>(bytes.begin(), bytes.end()));
+        if (ico.empty())
+        {
+            Log("icon: the game's icon is not a PNG the .ico takes, the executable gets none");
+            return "";
+        }
         WriteBytes(dir / "game_icon.ico", ico.data(), ico.size());
         std::string rc = "1 ICON \"game_icon.ico\"\n";
         WriteBytes(dir / "game_icon.rc", rc.data(), rc.size());
@@ -1007,7 +1054,7 @@ namespace
             Log("icon: could not embed the game's icon, the executable gets none");
             return "";
         }
-        Log("icon: the game's own, from default.xex");
+        Log("icon: the game's own");
         return "icon/game_icon.o";
     }
 
@@ -1206,7 +1253,7 @@ namespace
     void Usage()
     {
         fprintf(stderr, "usage: SkyBuild --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
-            "[--toolchain <dir>]\n");
+            "[--toolchain <dir>] [--icon-only]\n");
     }
 }
 
@@ -1226,6 +1273,8 @@ int main(int argc, char** argv)
             options.kit = PathFromUtf8(argv[++i]);
         else if (arg == "--toolchain" && hasValue)
             options.toolchain = PathFromUtf8(argv[++i]);
+        else if (arg == "--icon-only")
+            options.iconOnly = true;
         else if (arg == "--jobs" && hasValue)
             options.jobs = unsigned(std::max(1, atoi(argv[++i])));
         else
@@ -1292,6 +1341,14 @@ int main(int argc, char** argv)
                 "are needed");
 
         IdentifyGame(build);
+        if (options.iconOnly)
+        {
+            Step("icon", "Making the game's icon");
+            GameIconFiles files = GameIcon(build);
+            EndStep();
+            Emit("done", Slashes(files.png));
+            return 0;
+        }
         build.vars["GAME"] = build.game.id;
         PrepareToolchain(build);
         ReadDisc(build);
