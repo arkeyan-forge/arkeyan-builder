@@ -39,7 +39,7 @@ namespace
     struct Toolchain
     {
         const char* name;
-        const char* folder;  // the archive's top folder
+        const char* folder; // the archive's top folder
         const char* url;
         const char* sha256;
         uint64_t size;
@@ -85,7 +85,8 @@ namespace
     {
         if (!g_stepId.empty())
         {
-            auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - g_stepStart);
+            auto seconds =
+                std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - g_stepStart);
             Log("timing " + g_stepId + " " + std::to_string(seconds.count()) + " s");
         }
         g_stepId.clear();
@@ -98,17 +99,17 @@ namespace
         g_stepStart = std::chrono::steady_clock::now();
         Emit("step", std::string(id) + " " + title);
     }
-    void Progress(uint64_t done, uint64_t total) { Emit("progress", std::to_string(done) + " " + std::to_string(total)); }
+    void Progress(uint64_t done, uint64_t total)
+    {
+        Emit("progress", std::to_string(done) + " " + std::to_string(total));
+    }
 
     struct Failure
     {
         std::string message;
     };
 
-    [[noreturn]] void Fail(const std::string& message)
-    {
-        throw Failure{ message };
-    }
+    [[noreturn]] void Fail(const std::string& message) { throw Failure{ message }; }
 
     std::string ReadText(const fs::path& path)
     {
@@ -201,17 +202,17 @@ namespace
     // One game of the kit: config/<id>/game.txt.
     struct Game
     {
-        std::string id;                  // "ssa", "giants": the kit's folders (config, commands, lib, include, res) are named so
-        std::string name;                // "Skylanders: Giants"
-        std::string runtime;             // the built game's name: SSARecomp, SGRecomp
-        std::string toml;                // XenonRecomp's config, in config/<id>/
-        std::string shaders;             // where the shaders come from: "lsa" (shaders.lsa, effects.lsa and the XEX image)
-                                         // or "igz:<path of the archive>" (IGA v8 / IGZ v6 or IGA v10 / IGZ v7, extracted here)
+        std::string id; // "ssa", "giants": the kit's folders (config, commands, lib, include, res) are named so
+        std::string name; // "Skylanders: Giants"
+        std::string runtime; // the built game's name: SSARecomp, SGRecomp
+        std::string toml; // XenonRecomp's config, in config/<id>/
+        std::string shaders; // where the shaders come from: "lsa" (shaders.lsa, effects.lsa and the XEX image)
+        // or "igz:<path of the archive>" (IGA v8 / IGZ v6 or IGA v10 / IGZ v7, extracted here)
         std::vector<std::string> xexSha256; // the accepted default.xex files
         // The movie pass (AddMovieShaders); empty: no portal, no presses, it ends 8 s after the first new shader.
-        std::string moviePortal;         // SKY_PORTAL for the run ("emulated": an empty emulated portal)
-        std::string moviePress;          // SKY_PRESS for the run (presses through the menus)
-        unsigned movieShaders = 0;       // the run ends once this many new shaders are dumped
+        std::string moviePortal; // SKY_PORTAL for the run ("emulated": an empty emulated portal)
+        std::string moviePress; // SKY_PRESS for the run (presses through the menus)
+        unsigned movieShaders = 0; // the run ends once this many new shaders are dumped
     };
 
     struct Build
@@ -220,11 +221,11 @@ namespace
         Game game;
         fs::path work;
         std::map<std::string, std::string> kit; // kit.txt
-        std::string platform;                   // windows-x64, macos-arm64, linux-x64
+        std::string platform; // windows-x64, macos-arm64, linux-x64
         std::map<std::string, std::string> vars; // ${NAME} in the command templates
-        fs::path exe;                           // the built game
-        bool macos = false;                     // the kit's platform
-        bool cross = false;                     // a Windows kit driven from another OS (a developer check)
+        fs::path exe; // the built game
+        bool macos = false; // the kit's platform
+        bool cross = false; // a Windows kit driven from another OS (a developer check)
     };
 
     std::vector<std::string> SplitList(const std::string& text)
@@ -262,7 +263,8 @@ namespace
     }
 
     // One argument per line, ${NAME} replaced; a line that is exactly ${OBJECTS} becomes the object list.
-    std::vector<std::string> ExpandTemplate(const Build& build, const char* name, const std::vector<std::string>& objects)
+    std::vector<std::string> ExpandTemplate(
+        const Build& build, const char* name, const std::vector<std::string>& objects)
     {
         std::vector<std::string> args;
         std::ifstream file(GameDir(build, "commands") / name);
@@ -340,8 +342,7 @@ namespace
             RunOptions run;
             run.cwd = cache;
             run.log = build.work / "logs" / "download.log";
-            run.poll = [&]()
-            {
+            run.poll = [&]() {
                 std::error_code error;
                 uint64_t size = fs::exists(part, error) ? fs::file_size(part, error) : 0;
                 Progress(size >> 20, Compiler.size >> 20);
@@ -349,12 +350,13 @@ namespace
             };
 #ifdef _WIN32
             fs::path curl = PathFromUtf8(GetEnv("SystemRoot")) / "System32" / "curl.exe";
-            int result = Run({ fs::exists(curl) ? Slashes(curl) : "curl.exe", "-fL", "--retry", "3",
-                "--retry-delay", "5", "-o", Slashes(part.filename()), url }, run);
+            int result = Run({ fs::exists(curl) ? Slashes(curl) : "curl.exe", "-fL", "--retry", "3", "--retry-delay",
+                                 "5", "-o", Slashes(part.filename()), url },
+                run);
 #else
             // curl, else wget (a desktop has one of them; neither needs root).
-            int result = Run({ "curl", "-fL", "--retry", "3", "--retry-delay", "5", "-o", part.filename().string(), url },
-                run);
+            int result =
+                Run({ "curl", "-fL", "--retry", "3", "--retry-delay", "5", "-o", part.filename().string(), url }, run);
             if (result == -1 || result == 127)
                 result = Run({ "wget", "-q", "--tries=3", "-O", part.filename().string(), url }, run);
 #endif
@@ -362,7 +364,7 @@ namespace
             {
                 LogTail(run.log, 10);
                 Fail(std::string("could not download the compiler (") + Compiler.name +
-                    "): check the internet connection" + (result == -1 ? " (no curl or wget found)" : ""));
+                     "): check the internet connection" + (result == -1 ? " (no curl or wget found)" : ""));
             }
             fs::rename(part, archive);
         }
@@ -484,12 +486,14 @@ namespace
     {
         std::error_code error;
         // A copy of the game data (a folder, game_data.h) is stamped by its manifest, which changes with the copy.
-        fs::path stamped = fs::is_directory(build.options.iso, error) ? build.options.iso / "gamedata.manifest" : build.options.iso;
+        fs::path stamped =
+            fs::is_directory(build.options.iso, error) ? build.options.iso / "gamedata.manifest" : build.options.iso;
         auto size = fs::file_size(stamped, error);
-        auto time = std::chrono::duration_cast<std::chrono::seconds>(
-            fs::last_write_time(stamped, error).time_since_epoch()).count();
-        return "game=" + build.game.id + "\niso=" + Slashes(fs::absolute(build.options.iso)) + "\nsize=" + std::to_string(size) + "\ntime=" +
-            std::to_string(static_cast<long long>(time)) + "\n";
+        auto time =
+            std::chrono::duration_cast<std::chrono::seconds>(fs::last_write_time(stamped, error).time_since_epoch())
+                .count();
+        return "game=" + build.game.id + "\niso=" + Slashes(fs::absolute(build.options.iso)) +
+               "\nsize=" + std::to_string(size) + "\ntime=" + std::to_string(static_cast<long long>(time)) + "\n";
     }
 
     // The kit's games and which one the disc is: default.xex's SHA-256 against every config/<id>/game.txt. An unknown
@@ -526,7 +530,8 @@ namespace
         std::string supported;
         for (const Game& game : games)
             supported += (supported.empty() ? "" : ", ") + game.name;
-        Fail("this disc is not one of the games these tools build (" + supported + "): update the game tools (default.xex SHA-256 " + sha + ")");
+        Fail("this disc is not one of the games these tools build (" + supported +
+             "): update the game tools (default.xex SHA-256 " + sha + ")");
     }
 
     void ReadDisc(Build& build)
@@ -538,8 +543,7 @@ namespace
         std::string expected = DiscStamp(build);
         bool fromArchive = build.game.shaders.rfind("igz:", 0) == 0;
         // What the shader step needs is on disk: the XEX image (and the archives) for "lsa", the containers for "igz".
-        auto haveShaders = [&]()
-        {
+        auto haveShaders = [&]() {
             if (!fromArchive)
                 return fs::exists(input / "default.xex.image");
             std::error_code error;
@@ -574,9 +578,9 @@ namespace
             ShaderExtraction extraction;
             if (archive.empty() || !ExtractArchiveShaders(archive, input, extraction))
                 Fail("the disc has no readable " + path + ": is it " + build.game.name + "?");
-            Log(path + ": " + std::to_string(extraction.entries) + " entries, " + std::to_string(extraction.igz) + " IGZ, " +
-                std::to_string(extraction.vertex + extraction.pixel) + " shaders (" + std::to_string(extraction.vertex) +
-                " vertex, " + std::to_string(extraction.pixel) + " pixel)");
+            Log(path + ": " + std::to_string(extraction.entries) + " entries, " + std::to_string(extraction.igz) +
+                " IGZ, " + std::to_string(extraction.vertex + extraction.pixel) + " shaders (" +
+                std::to_string(extraction.vertex) + " vertex, " + std::to_string(extraction.pixel) + " pixel)");
             if (extraction.vertex + extraction.pixel == 0)
                 Fail("no shader found in " + path + ": is this the right disc?");
             Progress(3, 3);
@@ -596,7 +600,8 @@ namespace
             if (image.data == nullptr)
                 Fail("cannot decrypt default.xex");
             WriteBytes(input / "default.xex.image", image.data.get(), image.size);
-            Log("default.xex: " + std::to_string(xex.size() >> 10) + " KB, image " + std::to_string(image.size >> 10) + " KB");
+            Log("default.xex: " + std::to_string(xex.size() >> 10) + " KB, image " + std::to_string(image.size >> 10) +
+                " KB");
             Progress(4, 4);
         }
         WriteText(stamp, expected);
@@ -619,9 +624,10 @@ namespace
         for (const auto& [name, sha] : files)
             config += name + "=" + sha + ",";
         std::string expected = DiscStamp(build) + "config=" + Sha256Text(config) + "\ntranslator=" +
-            Sha256File(build.options.kit / "bin" / (std::string("XenonRecomp") + Exe)) + "\ncontext=" +
-            Sha256File(build.options.kit / "share" / "ppc_context.h") + "\nkit_config=" +
-            build.kit["ppc_config_sha256." + build.game.id] + "\nkit_context=" + build.kit["ppc_context_sha256"] + "\n";
+                               Sha256File(build.options.kit / "bin" / (std::string("XenonRecomp") + Exe)) +
+                               "\ncontext=" + Sha256File(build.options.kit / "share" / "ppc_context.h") +
+                               "\nkit_config=" + build.kit["ppc_config_sha256." + build.game.id] +
+                               "\nkit_context=" + build.kit["ppc_context_sha256"] + "\n";
         if (ReadText(stamp) == expected)
         {
             Log("up to date");
@@ -647,8 +653,9 @@ namespace
         RunOptions run;
         run.cwd = xenon;
         run.log = build.work / "logs" / "xenonrecomp.log";
-        int result = Run({ Slashes(build.options.kit / "bin" / (std::string("XenonRecomp") + Exe)), "config/" + build.game.toml,
-            "ppc_context.h" }, run);
+        int result = Run({ Slashes(build.options.kit / "bin" / (std::string("XenonRecomp") + Exe)),
+                             "config/" + build.game.toml, "ppc_context.h" },
+            run);
         if (result != 0 || !fs::exists(xenon / "ppc" / "ppc_config.h"))
         {
             LogTail(run.log);
@@ -658,10 +665,11 @@ namespace
         // The kit's runtime was compiled against these two headers: another disc version would not match it.
         for (const char* header : { "ppc_config.h", "ppc_context.h" })
         {
-            std::string key = std::string(header) == "ppc_config.h" ? "ppc_config_sha256." + build.game.id : "ppc_context_sha256";
+            std::string key =
+                std::string(header) == "ppc_config.h" ? "ppc_config_sha256." + build.game.id : "ppc_context_sha256";
             if (Sha256File(xenon / "ppc" / header) != build.kit[key])
-                Fail(std::string("this disc does not match the kit (") + header + " differs): the kit's " + build.game.name +
-                    " runtime was built for another version of the game");
+                Fail(std::string("this disc does not match the kit (") + header + " differs): the kit's " +
+                     build.game.name + " runtime was built for another version of the game");
         }
 
         size_t changed = 0;
@@ -700,8 +708,9 @@ namespace
         // The translator and shader_common.h decide the translated text; the compiled results are kept by the text's
         // hash (below), so a new translator redoes the translation but only compiles what changed.
         fs::path xenos = build.options.kit / "bin" / (std::string("XenosRecomp") + Exe);
-        std::string expected = DiscStamp(build) + "runtime=" + RuntimeShaderList(build) + "\ntranslator=" + Sha256File(xenos) +
-            "\ncommon=" + Sha256File(build.options.kit / "share" / "shader_common.h") + "\n";
+        std::string expected = DiscStamp(build) + "runtime=" + RuntimeShaderList(build) +
+                               "\ntranslator=" + Sha256File(xenos) +
+                               "\ncommon=" + Sha256File(build.options.kit / "share" / "shader_common.h") + "\n";
         if (ReadText(stamp) == expected && fs::exists(cache))
         {
             Log("up to date");
@@ -741,8 +750,7 @@ namespace
         run.cwd = build.work;
         run.log = build.work / "logs" / "xenosrecomp.log";
         run.timeoutSeconds = 30 * 60;
-        run.poll = [&]()
-        {
+        run.poll = [&]() {
             std::ifstream log(run.log, std::ios::binary | std::ios::ate);
             if (!log)
                 return false;
@@ -752,16 +760,17 @@ namespace
             log.read(tail.data(), std::streamsize(tail.size()));
             size_t at = tail.rfind("Progress ");
             unsigned long long done = 0, total = 0;
-            if (at != std::string::npos && sscanf(tail.c_str() + at, "Progress %llu %llu", &done, &total) == 2 && total > 0 &&
-                (done != shown.first || total != shown.second))
+            if (at != std::string::npos && sscanf(tail.c_str() + at, "Progress %llu %llu", &done, &total) == 2 &&
+                total > 0 && (done != shown.first || total != shown.second))
             {
                 shown = { done, total };
                 Progress(done, total);
             }
             return false;
         };
-        int result = Run({ Slashes(xenos), "shaders/input", "shaders/shader_cache.cpp", "shaders/shader_common.h",
-            "shaders/cache" }, run);
+        int result = Run(
+            { Slashes(xenos), "shaders/input", "shaders/shader_cache.cpp", "shaders/shader_common.h", "shaders/cache" },
+            run);
         if (result != 0 || !fs::exists(shaders / "shader_cache.cpp"))
         {
             LogTail(run.log);
@@ -879,8 +888,7 @@ namespace
         std::vector<std::thread> threads;
         for (unsigned t = 0; t < std::min<size_t>(build.options.jobs, jobs.size()); t++)
         {
-            threads.emplace_back([&]()
-            {
+            threads.emplace_back([&]() {
                 while (!failed)
                 {
                     size_t index = next++;
@@ -898,7 +906,7 @@ namespace
                         {
                             LogTail(run.log, 30);
                             failure = "compiling " + Slashes(job.source.filename()) + " failed (exit code " +
-                                std::to_string(result) + ")";
+                                      std::to_string(result) + ")";
                         }
                         return;
                     }
@@ -962,7 +970,8 @@ namespace
         {
             std::vector<uint8_t> xex = fileSystem.ReadAll("default.xex");
             big = small = ReadTitleMetadata(xex).iconPng;
-            Log(big.empty() ? "icon: no logo and no title icon on the disc" : "icon: no readable logo, using the title icon of default.xex");
+            Log(big.empty() ? "icon: no logo and no title icon on the disc"
+                            : "icon: no readable logo, using the title icon of default.xex");
         }
         else
             Log("icon: the game's logo, fitted into a square");
@@ -1003,8 +1012,10 @@ namespace
             for (int scale : { 1, 2 })
             {
                 std::string pixels = std::to_string(points * scale);
-                std::string name = "icon_" + std::to_string(points) + "x" + std::to_string(points) + (scale == 2 ? "@2x" : "") + ".png";
-                ok = ok && Run({ "sips", "-z", pixels, pixels, Slashes(files.png), "--out", Slashes(set / name) }, run) == 0;
+                std::string name = "icon_" + std::to_string(points) + "x" + std::to_string(points) +
+                                   (scale == 2 ? "@2x" : "") + ".png";
+                ok = ok &&
+                     Run({ "sips", "-z", pixels, pixels, Slashes(files.png), "--out", Slashes(set / name) }, run) == 0;
             }
         }
         ok = ok && Run({ "iconutil", "-c", "icns", "-o", Slashes(icns), Slashes(set) }, run) == 0;
@@ -1044,11 +1055,13 @@ namespace
         WriteBytes(dir / "game_icon.ico", ico.data(), ico.size());
         std::string rc = "1 ICON \"game_icon.ico\"\n";
         WriteBytes(dir / "game_icon.rc", rc.data(), rc.size());
-        fs::path windres = fs::path(build.vars.at("CXX")).parent_path() / (std::string("x86_64-w64-mingw32-windres") + Exe);
+        fs::path windres =
+            fs::path(build.vars.at("CXX")).parent_path() / (std::string("x86_64-w64-mingw32-windres") + Exe);
         RunOptions run;
         run.cwd = dir;
         run.log = build.work / "logs" / "icon.log";
-        if (Run({ Slashes(windres), "-O", "coff", "-o", "game_icon.o", "game_icon.rc" }, run) != 0 || !fs::exists(object))
+        if (Run({ Slashes(windres), "-O", "coff", "-o", "game_icon.o", "game_icon.rc" }, run) != 0 ||
+            !fs::exists(object))
         {
             LogTail(run.log);
             Log("icon: could not embed the game's icon, the executable gets none");
@@ -1178,8 +1191,7 @@ namespace
         std::ifstream skipped(build.work / "shaders" / "skipped.txt");
         for (std::string line; std::getline(skipped, line);)
             cached.insert(strtoull(line.c_str(), nullptr, 16));
-        auto missing = [&]()
-        {
+        auto missing = [&]() {
             std::vector<fs::path> files;
             std::error_code error;
             for (const auto& entry : fs::directory_iterator(movies / "dump", error))
@@ -1195,12 +1207,12 @@ namespace
         // portal (without one it stops at "PORTAL DISCONNECTED") and presses.
         const Game& game = build.game;
         const std::string portal = game.moviePortal.empty() ? "none" : game.moviePortal;
-        const std::pair<const char*, const char*> environment[] = {
-            { "SKY_HEADLESS", "1" }, { "SKY_DUMP_SHADERS", "dump" }, { "SKY_SETTINGS", "settings.ini" },
-            { "SKY_SAVE_DIR", "saves" }, { "SKY_COLLECTION", "collection" }, { "SKY_PORTAL", portal.c_str() },
-            { "SKY_PORTAL_PLACE", "" }, { "SDL_AUDIO_DRIVER", "dummy" }, { "SKY_LAUNCHER_SHOTS", "" },
-            { "SKY_SKIP_MOVIES", "" }, { "SKY_PRESS", game.moviePress.c_str() },
-            { "SKYLANDERS_DATA", "data" }, { "SKY_LAUNCHER_INI", "none.ini" }, { "SKY_LOG", "runtime.log" } };
+        const std::pair<const char*, const char*> environment[] = { { "SKY_HEADLESS", "1" },
+            { "SKY_DUMP_SHADERS", "dump" }, { "SKY_SETTINGS", "settings.ini" }, { "SKY_SAVE_DIR", "saves" },
+            { "SKY_COLLECTION", "collection" }, { "SKY_PORTAL", portal.c_str() }, { "SKY_PORTAL_PLACE", "" },
+            { "SDL_AUDIO_DRIVER", "dummy" }, { "SKY_LAUNCHER_SHOTS", "" }, { "SKY_SKIP_MOVIES", "" },
+            { "SKY_PRESS", game.moviePress.c_str() }, { "SKYLANDERS_DATA", "data" }, { "SKY_LAUNCHER_INI", "none.ini" },
+            { "SKY_LOG", "runtime.log" } };
         std::vector<std::string> previous; // the caller's values, put back after the run
         for (const auto& [name, value] : environment)
         {
@@ -1214,8 +1226,7 @@ namespace
         run.cwd = movies;
         run.log = movies / "game.log";
         run.timeoutSeconds = 120;
-        run.poll = [&]()
-        {
+        run.poll = [&]() {
             auto now = std::chrono::steady_clock::now();
             Progress(uint64_t(std::chrono::duration_cast<std::chrono::seconds>(now - start).count()), 120);
             size_t found = missing().size();
@@ -1253,7 +1264,7 @@ namespace
     void Usage()
     {
         fprintf(stderr, "usage: SkyBuild --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
-            "[--toolchain <dir>] [--icon-only]\n");
+                        "[--toolchain <dir>] [--icon-only]\n");
     }
 }
 
@@ -1337,7 +1348,8 @@ int main(int argc, char** argv)
         std::error_code error;
         auto space = fs::space(options.out, error);
         if (!error && space.available < (6ull << 30))
-            Log("warning: only " + std::to_string(space.available >> 20) + " MB free on the game drive; about 5 GB "
+            Log("warning: only " + std::to_string(space.available >> 20) +
+                " MB free on the game drive; about 5 GB "
                 "are needed");
 
         IdentifyGame(build);

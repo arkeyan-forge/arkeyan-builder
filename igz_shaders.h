@@ -18,4 +18,5 @@ struct ShaderExtraction
 // and writes every Xenos shader container it holds to <outDir>/<hash>.vs|.ps, exactly as the game hands it to D3DVertexShader_Init /
 // D3DPixelShader_Init (the virtual part followed by the physical part). Equal containers are written once.
 // False when `archive` is not an IGA archive the runtime's reader knows.
-bool ExtractArchiveShaders(const std::vector<uint8_t>& archive, const std::filesystem::path& outDir, ShaderExtraction& result);
+bool ExtractArchiveShaders(
+    const std::vector<uint8_t>& archive, const std::filesystem::path& outDir, ShaderExtraction& result);

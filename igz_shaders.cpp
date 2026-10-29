@@ -109,7 +109,8 @@ namespace
             uint64_t offset;
         };
         std::vector<Block> physicalBlocks;
-        size_t o = sections[0].offset, stop = std::min<size_t>(size_t(sections[0].offset) + sections[0].size, igz.size());
+        size_t o = sections[0].offset,
+               stop = std::min<size_t>(size_t(sections[0].offset) + sections[0].size, igz.size());
         while (o + 16 <= stop)
         {
             uint32_t count = Be32(&igz[o + 4]), length = Be32(&igz[o + 8]), start = Be32(&igz[o + 12]);
@@ -121,7 +122,8 @@ namespace
                     uint32_t word = Be32(&igz[o + start + 8 * i]), rel = Be32(&igz[o + start + 8 * i + 4]);
                     size_t index = (rel >> 27) + 1;
                     if (word >> 24 == 0x18 && index < sections.size())
-                        physicalBlocks.push_back({ word & 0xFFFFFF, uint64_t(sections[index].offset) + (rel & 0x7FFFFFF) });
+                        physicalBlocks.push_back(
+                            { word & 0xFFFFFF, uint64_t(sections[index].offset) + (rel & 0x7FFFFFF) });
                 }
             o += length;
         }
@@ -149,7 +151,8 @@ namespace
     }
 }
 
-bool ExtractArchiveShaders(const std::vector<uint8_t>& archive, const std::filesystem::path& outDir, ShaderExtraction& result)
+bool ExtractArchiveShaders(
+    const std::vector<uint8_t>& archive, const std::filesystem::path& outDir, ShaderExtraction& result)
 {
     auto iga = art::alchemy::IgaArchive::Open(
         [&archive](uint64_t offset, size_t size, uint8_t* out) {

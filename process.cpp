@@ -80,8 +80,8 @@ int Run(const std::vector<std::string>& args, const RunOptions& options)
     SECURITY_ATTRIBUTES inherit{ sizeof(inherit), nullptr, TRUE };
     HANDLE output = CreateFileW(options.log.empty() ? L"NUL" : options.log.wstring().c_str(), GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0,
-        nullptr);
+    HANDLE input =
+        CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &inherit, OPEN_EXISTING, 0, nullptr);
 
     // Only these two handles are inherited: children started at the same time by other threads must not keep this
     // child's log open (it could not be deleted afterwards).
@@ -91,8 +91,8 @@ int Run(const std::vector<std::string>& args, const RunOptions& options)
     std::vector<char> attributes(attributesSize);
     auto* attributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributes.data());
     InitializeProcThreadAttributeList(attributeList, 1, 0, &attributesSize);
-    UpdateProcThreadAttribute(attributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof(inherited),
-        nullptr, nullptr);
+    UpdateProcThreadAttribute(
+        attributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited, sizeof(inherited), nullptr, nullptr);
 
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
@@ -125,7 +125,7 @@ int Run(const std::vector<std::string>& args, const RunOptions& options)
             break;
         }
         bool timedOut = options.timeoutSeconds > 0 &&
-            std::chrono::steady_clock::now() - start > std::chrono::seconds(options.timeoutSeconds);
+                        std::chrono::steady_clock::now() - start > std::chrono::seconds(options.timeoutSeconds);
         bool stop = !timedOut && options.poll && options.poll();
         if (timedOut || stop)
         {
@@ -171,10 +171,7 @@ std::string ShortPath(const fs::path& path)
     return size > 0 && size < 32768 ? Narrow(std::wstring(buffer, size)) : Narrow(path.wstring());
 }
 
-fs::path PathFromUtf8(const std::string& text)
-{
-    return fs::path(Widen(text));
-}
+fs::path PathFromUtf8(const std::string& text) { return fs::path(Widen(text)); }
 
 std::string Slashes(const fs::path& path)
 {
@@ -219,7 +216,7 @@ int Run(const std::vector<std::string>& args, const RunOptions& options)
         if (++ticks % 25 != 0)
             continue;
         bool timedOut = options.timeoutSeconds > 0 &&
-            std::chrono::steady_clock::now() - start > std::chrono::seconds(options.timeoutSeconds);
+                        std::chrono::steady_clock::now() - start > std::chrono::seconds(options.timeoutSeconds);
         bool stop = !timedOut && options.poll && options.poll();
         if (timedOut || stop)
         {
@@ -268,18 +265,9 @@ fs::path ExecutableDirectory()
 #endif
 }
 
-std::string ShortPath(const fs::path& path)
-{
-    return path.string();
-}
+std::string ShortPath(const fs::path& path) { return path.string(); }
 
-fs::path PathFromUtf8(const std::string& text)
-{
-    return fs::path(text);
-}
+fs::path PathFromUtf8(const std::string& text) { return fs::path(text); }
 
-std::string Slashes(const fs::path& path)
-{
-    return path.string();
-}
+std::string Slashes(const fs::path& path) { return path.string(); }
 #endif
