@@ -19,6 +19,7 @@
 #include "igz_shaders.h"
 #include "process.h"
 #include "sha256.h"
+#include "version_resource.h"
 #include "vfs.h"
 #include <image.h>
 #include <algorithm>
@@ -1029,32 +1030,37 @@ namespace
         return icns;
     }
 
-    // Windows: the game's icon in the executable, game_icon_256.png as an .ico (one PNG entry, ico.h) that windres
-    // (llvm-mingw's) turns into an object linked with the game. Returns the object's path relative to the build folder, or
-    // "" when there is no icon or a tool fails: the executable then has none, as before.
-    std::string ExecutableIcon(const Build& build)
+    // Windows: the executable's resources, which windres (llvm-mingw's) turns into an object linked with the game: its
+    // VERSIONINFO and, when the disc has one, the game's icon, game_icon_256.png as an .ico (one PNG entry, ico.h). Returns
+    // the object's path relative to the build folder, or "" when a tool fails: the executable then has neither, as before.
+    std::string ExecutableResources(Build& build)
     {
         fs::path dir = build.work / "icon";
         fs::path object = dir / "game_icon.o";
+        fs::path script = dir / "game_icon.rc";
+        fs::create_directories(dir);
+        std::string rc =
+            VersionResource(build.game.name, build.game.runtime, build.kit["game_version." + build.game.id]);
         GameIconFiles files = GameIcon(build);
+        std::vector<uint8_t> ico;
         if (files.png.empty())
-        {
             Log("icon: the disc has no icon, the executable gets none");
-            return "";
+        else
+        {
+            std::string bytes = ReadText(files.icoPng);
+            ico = MakeIco(std::vector<uint8_t>(bytes.begin(), bytes.end()));
+            if (ico.empty())
+                Log("icon: the game's icon is not a PNG the .ico takes, the executable gets none");
+            else
+                rc = "1 ICON \"game_icon.ico\"\n" + rc;
         }
         std::error_code error;
-        if (fs::exists(object) && fs::last_write_time(object, error) >= fs::last_write_time(files.icoPng, error))
+        if (fs::exists(object) && fs::exists(script) && ReadText(script) == rc &&
+            (ico.empty() || fs::last_write_time(object, error) >= fs::last_write_time(files.icoPng, error)))
             return "icon/game_icon.o";
-        std::string bytes = ReadText(files.icoPng);
-        std::vector<uint8_t> ico = MakeIco(std::vector<uint8_t>(bytes.begin(), bytes.end()));
-        if (ico.empty())
-        {
-            Log("icon: the game's icon is not a PNG the .ico takes, the executable gets none");
-            return "";
-        }
-        WriteBytes(dir / "game_icon.ico", ico.data(), ico.size());
-        std::string rc = "1 ICON \"game_icon.ico\"\n";
-        WriteBytes(dir / "game_icon.rc", rc.data(), rc.size());
+        if (!ico.empty())
+            WriteBytes(dir / "game_icon.ico", ico.data(), ico.size());
+        WriteBytes(script, rc.data(), rc.size());
         fs::path windres =
             fs::path(build.vars.at("CXX")).parent_path() / (std::string("x86_64-w64-mingw32-windres") + Exe);
         RunOptions run;
@@ -1064,10 +1070,11 @@ namespace
             !fs::exists(object))
         {
             LogTail(run.log);
-            Log("icon: could not embed the game's icon, the executable gets none");
+            Log("icon: could not embed the game's resources, the executable gets no icon and no version");
             return "";
         }
-        Log("icon: the game's own");
+        if (!ico.empty())
+            Log("icon: the game's own");
         return "icon/game_icon.o";
     }
 
@@ -1098,8 +1105,8 @@ namespace
         build.vars["OUT"] = Slashes(build.exe);
         std::vector<std::string> objects = ObjectList(build);
         if (build.platform == "windows-x64")
-            if (std::string icon = ExecutableIcon(build); !icon.empty())
-                objects.push_back(icon);
+            if (std::string resources = ExecutableResources(build); !resources.empty())
+                objects.push_back(resources);
         // The link is fresh when its command (the kit's folder aside) and the content of the kit's libraries are the same.
         std::vector<std::string> command = ExpandTemplate(build, "link.args", objects);
         std::string key = CommandText(build, command);
