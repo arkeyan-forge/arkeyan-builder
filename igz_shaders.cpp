@@ -34,7 +34,7 @@ namespace
             uint32_t offset, size;
         };
         std::vector<Section> sections;
-        for (int i = 0; i < 16 && 0x10 + 16 * (i + 1) <= igz.size(); i++)
+        for (size_t i = 0; i < 16 && 0x10 + 16 * (i + 1) <= igz.size(); i++)
         {
             Section s{ Be32(&igz[0x10 + 16 * i]), Be32(&igz[0x14 + 16 * i]) };
             if (s.size)
@@ -93,7 +93,7 @@ namespace
             uint32_t offset, size;
         };
         std::vector<Section> sections;
-        for (int i = 0; i < 16 && 0x14 + 16 * (i + 1) <= igz.size(); i++)
+        for (size_t i = 0; i < 16 && 0x14 + 16 * (i + 1) <= igz.size(); i++)
         {
             Section s{ Be32(&igz[0x18 + 16 * i]), Be32(&igz[0x1C + 16 * i]) };
             if (s.size == 0)

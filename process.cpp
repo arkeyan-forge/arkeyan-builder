@@ -191,7 +191,14 @@ int Run(const std::vector<std::string>& args, const RunOptions& options)
     posix_spawn_file_actions_addopen(&actions, 1, log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     posix_spawn_file_actions_adddup2(&actions, 1, 2);
     if (!options.cwd.empty())
+    {
+        // macOS 26 replaced the _np call with the POSIX one; older systems (the kit's minimum) only have the _np one.
+#if defined(__APPLE__) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 260000
+        posix_spawn_file_actions_addchdir(&actions, options.cwd.c_str());
+#else
         posix_spawn_file_actions_addchdir_np(&actions, options.cwd.c_str());
+#endif
+    }
     std::vector<char*> argv;
     for (const std::string& arg : args)
         argv.push_back(const_cast<char*>(arg.c_str()));

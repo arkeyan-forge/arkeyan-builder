@@ -8,7 +8,8 @@ else()
 endif()
 add_executable(SkyBuild main.cpp process.cpp sha256.cpp igz_shaders.cpp game_icon.cpp
     ${CMAKE_SOURCE_DIR}/runtime/vfs.cpp ${CMAKE_SOURCE_DIR}/runtime/host/xex_title.cpp ${SKYBUILD_PLATFORM})
-target_include_directories(SkyBuild PRIVATE ${CMAKE_SOURCE_DIR}/runtime ${CMAKE_SOURCE_DIR}/thirdparty/stb ${CMAKE_SOURCE_DIR}/runtime/platform/win32)
+target_include_directories(SkyBuild PRIVATE ${CMAKE_SOURCE_DIR}/runtime ${CMAKE_SOURCE_DIR}/runtime/platform/win32)
+target_include_directories(SkyBuild SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/thirdparty/stb) # stb's own warnings are not ours
 target_link_libraries(SkyBuild PRIVATE SSAArtReader SSAXenonUtils)
 if(WIN32)
     target_compile_definitions(SkyBuild PRIVATE _WIN32_WINNT=0x0A00) # Windows 10
