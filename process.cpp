@@ -153,7 +153,8 @@ std::string GetEnv(const char* name)
 
 uint64_t PhysicalMemoryBytes()
 {
-    MEMORYSTATUSEX status{ sizeof(status) };
+    MEMORYSTATUSEX status{};
+    status.dwLength = sizeof(status);
     return GlobalMemoryStatusEx(&status) ? status.ullTotalPhys : 0;
 }
 
