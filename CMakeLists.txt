@@ -19,3 +19,14 @@ if(WIN32)
     target_link_libraries(SkyBuild PRIVATE winmm)
 endif()
 add_executable(SSAVersionResourceTest version_resource_test.cpp)
+
+add_executable(SSASkyBuildTest skybuild_test.cpp igz_shaders.cpp sha256.cpp)
+target_link_libraries(SSASkyBuildTest PRIVATE SSAArtReader)
+sky_quality(SSASkyBuildTest)
+add_test(NAME SSASkyBuildTest COMMAND SSASkyBuildTest ${CMAKE_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/skybuild-test)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/skybuild-test)
+set_tests_properties(SSASkyBuildTest PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/skybuild-test
+    TIMEOUT 120)
+# Source metadata is read only; generated fixtures stay in the build folder.
+set_property(TEST SSASkyBuildTest PROPERTY ENVIRONMENT "SKYLANDERS_DATA=${CMAKE_CURRENT_BINARY_DIR}/skybuild-test/data")

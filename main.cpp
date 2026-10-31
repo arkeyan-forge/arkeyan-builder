@@ -2,8 +2,8 @@
 //
 //   SkyBuild --iso <iso or copied game data folder> --out <game dir> [--kit <kit dir>] [--jobs N] [--toolchain <dir>]
 //
-// The kit holds several games (kit.txt: games=ssa,giants). The disc's default.xex, by its SHA-256, says which one this
-// is (config/<id>/game.txt); everything below then comes from that game's part of the kit.
+// The kit holds several games (kit.txt: games=ssa,giants,swapforce,trapteam). The disc's default.xex, by its SHA-256,
+// identifies one (config/<id>/game.txt); everything below then comes from that game's part of the kit.
 //
 // Steps: the compiler (llvm-mingw on Windows, zig's clang on Linux: downloaded and checked; Xcode's clang on macOS),
 // the disc's files
@@ -15,6 +15,7 @@
 #include "host/art/ico.h"
 #include "host/xex_title.h"
 #include "game_icon.h"
+#include "game_config.h"
 #include "host/art/game_art.h"
 #include "igz_shaders.h"
 #include "process.h"
@@ -36,6 +37,7 @@
 
 namespace
 {
+    using namespace skybuild;
     // The compiler SkyBuild downloads: the one the kit's runtime was built with (tools/make_kit.sh), pinned by SHA-256.
     struct Toolchain
     {
@@ -174,22 +176,6 @@ namespace
         return true;
     }
 
-    // key=value lines.
-    std::map<std::string, std::string> ReadKeyValues(const fs::path& path)
-    {
-        std::map<std::string, std::string> values;
-        std::ifstream file(path);
-        for (std::string line; std::getline(file, line);)
-        {
-            if (!line.empty() && line.back() == '\r')
-                line.pop_back();
-            size_t equals = line.find('=');
-            if (equals != std::string::npos && line[0] != '#')
-                values[line.substr(0, equals)] = line.substr(equals + 1);
-        }
-        return values;
-    }
-
     struct Options
     {
         fs::path iso;
@@ -198,22 +184,6 @@ namespace
         fs::path toolchain;
         unsigned jobs = 0;
         bool iconOnly = false; // --icon-only: make the game's icon (GameIcon) and stop; a check, no build
-    };
-
-    // One game of the kit: config/<id>/game.txt.
-    struct Game
-    {
-        std::string id; // "ssa", "giants": the kit's folders (config, commands, lib, include, res) are named so
-        std::string name; // "Skylanders: Giants"
-        std::string runtime; // the built game's name: SSARecomp, SGRecomp
-        std::string toml; // XenonRecomp's config, in config/<id>/
-        std::string shaders; // where the shaders come from: "lsa" (shaders.lsa, effects.lsa and the XEX image)
-        // or "igz:<path of the archive>" (IGA v8 / IGZ v6 or IGA v10 / IGZ v7, extracted here)
-        std::vector<std::string> xexSha256; // the accepted default.xex files
-        // The movie pass (AddMovieShaders); empty: no portal, no presses, it ends 8 s after the first new shader.
-        std::string moviePortal; // SKY_PORTAL for the run ("emulated": an empty emulated portal)
-        std::string moviePress; // SKY_PRESS for the run (presses through the menus)
-        unsigned movieShaders = 0; // the run ends once this many new shaders are dumped
     };
 
     struct Build
@@ -228,16 +198,6 @@ namespace
         bool macos = false; // the kit's platform
         bool cross = false; // a Windows kit driven from another OS (a developer check)
     };
-
-    std::vector<std::string> SplitList(const std::string& text)
-    {
-        std::vector<std::string> items;
-        std::stringstream stream(text);
-        for (std::string item; std::getline(stream, item, ',');)
-            if (!item.empty())
-                items.push_back(item);
-        return items;
-    }
 
     // Per-game folder of a kit part: <kit>/<part>/<game id>/.
     fs::path GameDir(const Build& build, const char* part) { return build.options.kit / part / build.game.id; }
@@ -507,9 +467,7 @@ namespace
             auto values = ReadKeyValues(build.options.kit / "config" / id / "game.txt");
             if (values.empty())
                 Fail("the kit lists the game " + id + " but has no config/" + id + "/game.txt");
-            games.push_back({ id, values["name"], values["runtime"], values["toml"], values["shaders"],
-                SplitList(values["xex_sha256"]), values["movie_portal"], values["movie_press"],
-                unsigned(strtoul(values["movie_shaders"].c_str(), nullptr, 10)) });
+            games.push_back(ReadGame(id, std::move(values)));
         }
         if (games.empty())
             Fail("this kit lists no game (kit.txt has no games=)");
@@ -521,13 +479,12 @@ namespace
         if (xex.empty())
             Fail("the disc has no default.xex: it is not an Xbox 360 game disc");
         std::string sha = Sha256Text(std::string(reinterpret_cast<const char*>(xex.data()), xex.size()));
-        for (const Game& game : games)
-            if (std::find(game.xexSha256.begin(), game.xexSha256.end(), sha) != game.xexSha256.end())
-            {
-                build.game = game;
-                Log("game: " + game.name + " (default.xex " + sha.substr(0, 12) + "...)");
-                return;
-            }
+        if (const Game* game = FindGame(games, sha))
+        {
+            build.game = *game;
+            Log("game: " + game->name + " (default.xex " + sha.substr(0, 12) + "...)");
+            return;
+        }
         std::string supported;
         for (const Game& game : games)
             supported += (supported.empty() ? "" : ", ") + game.name;
@@ -570,7 +527,7 @@ namespace
             Fail("the disc has no default.xex: is it " + build.game.name + "?");
         WriteBytes(disc / "default.xex", xex.data(), xex.size());
 
-        if (fromArchive)
+        if (fromArchive && build.game.shaders != "igz:all")
         {
             // Alchemy: every shader is in one IGA archive (games/giants/docs/shaders.md, games/swapforce/docs/shaders.md).
             std::string path = build.game.shaders.substr(4);
@@ -585,6 +542,34 @@ namespace
             if (extraction.vertex + extraction.pixel == 0)
                 Fail("no shader found in " + path + ": is this the right disc?");
             Progress(3, 3);
+        }
+        else if (fromArchive)
+        {
+            // Trap Team scans the .arc/.bld pairs across the disc, deduplicating shared containers.
+            std::vector<std::string> files;
+            for (const auto& file : fileSystem.Files())
+                files.push_back(file.first);
+            auto paths = ShaderArchivePaths(build.game.shaders, files);
+            if (paths.empty())
+                Fail("no shader archive found: is this " + build.game.name + "?");
+            std::set<std::string> seen;
+            size_t total = 0;
+            for (size_t i = 0; i < paths.size(); i++)
+            {
+                const auto& path = paths[i];
+                std::vector<uint8_t> archive = fileSystem.ReadAll(path);
+                ShaderExtraction extraction;
+                if (archive.empty() || !ExtractArchiveShaders(archive, input, extraction, &seen))
+                    Fail("the disc has no readable " + path + ": is it " + build.game.name + "?");
+                Log(path + ": " + std::to_string(extraction.entries) + " entries, " + std::to_string(extraction.igz) +
+                    " IGZ, " + std::to_string(extraction.vertex + extraction.pixel) + " shaders (" +
+                    std::to_string(extraction.vertex) + " vertex, " + std::to_string(extraction.pixel) + " pixel)");
+                total += extraction.vertex + extraction.pixel;
+                Progress(i + 1, paths.size());
+            }
+            if (total == 0)
+                Fail("no shader found in " + build.game.shaders + ": is this the right disc?");
+            Log(std::to_string(total) + " distinct disc shaders");
         }
         else
         {

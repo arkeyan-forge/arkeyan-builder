@@ -1,5 +1,5 @@
 // See igz_shaders.h. The formats are documented in games/giants/docs/shaders.md and games/swapforce/docs/shaders.md
-// (reverse-engineered from the discs); the archive reader (IGA v8 and v10, the chunked LZMA) is the runtime's,
+// (reverse-engineered from the discs); the archive reader (IGA v8, v10 and v11, the chunked LZMA) is the runtime's,
 // host/art/alchemy_archive.h.
 #include "igz_shaders.h"
 #include "host/art/alchemy_archive.h"
@@ -151,8 +151,24 @@ namespace
     }
 }
 
-bool ExtractArchiveShaders(
-    const std::vector<uint8_t>& archive, const std::filesystem::path& outDir, ShaderExtraction& result)
+std::vector<std::string> ShaderArchivePaths(const std::string& recipe, const std::vector<std::string>& files)
+{
+    if (recipe.rfind("igz:", 0) != 0)
+        return {};
+    if (recipe != "igz:all")
+        return { recipe.substr(4) };
+    std::vector<std::string> paths;
+    for (const auto& path : files)
+    {
+        auto extension = std::filesystem::path(path).extension();
+        if (extension == ".arc" || extension == ".bld")
+            paths.push_back(path);
+    }
+    return paths;
+}
+
+bool ExtractArchiveShaders(const std::vector<uint8_t>& archive, const std::filesystem::path& outDir,
+    ShaderExtraction& result, std::set<std::string>* sharedSeen)
 {
     auto iga = art::alchemy::IgaArchive::Open(
         [&archive](uint64_t offset, size_t size, uint8_t* out) {
@@ -165,7 +181,8 @@ bool ExtractArchiveShaders(
     if (!iga)
         return false;
     result.entries = iga->Count();
-    std::set<std::string> seen;
+    std::set<std::string> localSeen;
+    auto& seen = sharedSeen ? *sharedSeen : localSeen;
     std::filesystem::create_directories(outDir);
     for (size_t i = 0; i < iga->Count(); i++)
     {
@@ -175,7 +192,7 @@ bool ExtractArchiveShaders(
         if (data.size() < 0x40 || memcmp(data.data(), "IGZ\x01", 4) != 0)
             continue;
         uint32_t version = Be32(&data[4]);
-        if (version != 6 && version != 7)
+        if (version != 6 && version != 7 && version != 8)
             continue;
         result.igz++;
         auto write = [&](const std::string& blob, bool vertex) {
@@ -189,7 +206,7 @@ bool ExtractArchiveShaders(
         if (version == 6)
             ForEachContainerV6(data, write);
         else
-            ForEachContainerV7(data, write);
+            ForEachContainerV7(data, write); // v8 (Trap Team) has v7's section table and memory handles [V]
     }
     return true;
 }
