@@ -37,11 +37,19 @@ namespace skybuild
         std::string shaders; // where the shaders come from: "lsa" (shaders.lsa, effects.lsa and the XEX image)
         // or "igz:<archive path>" (Giants, Swap Force), "igz:all" (Trap Team: IGA v11 / IGZ v8)
         std::vector<std::string> xexSha256; // the accepted default.xex files
-        // The movie pass (AddMovieShaders); empty: no portal, no presses, it ends 8 s after the first new shader.
+        // The movie pass (AddMovieShaders); empty: no portal, no presses, and with no count it ends 8 s after the first new
+        // shader.
         std::string moviePortal; // SKY_PORTAL for the run ("emulated": an empty emulated portal)
         std::string moviePress; // SKY_PRESS for the run (presses through the menus)
-        unsigned movieShaders = 0; // the run ends once this many new shaders are dumped
+        unsigned movieShaders = 0; // the run ends once the game has this many run-time shaders
     };
+
+    // movies/done.txt holds how many shaders the pass found. Fewer than the game has is not done: a pass that ended early
+    // leaves a game whose missing shaders' draws are skipped (Giants: a black picture on Windows).
+    inline bool MoviePassDone(const std::string& stamp, unsigned expected)
+    {
+        return strtoul(stamp.c_str(), nullptr, 10) >= expected;
+    }
 
     inline std::vector<std::string> SplitList(const std::string& text)
     {

@@ -1163,7 +1163,8 @@ namespace
         Step("movies", "Adding the movie shaders");
         fs::path movies = build.work / "movies";
         fs::path stamp = movies / "done.txt";
-        if (fs::exists(stamp))
+        const Game& game = build.game;
+        if (fs::exists(stamp) && MoviePassDone(ReadText(stamp), game.movieShaders))
         {
             Log("up to date");
             return false;
@@ -1173,6 +1174,12 @@ namespace
             Log("skipped: the game cannot run on this OS");
             return false;
         }
+        // What an earlier pass found stays: an update that repairs a short pass only looks for the rest.
+        fs::path runtime = build.work / "shaders" / "input" / "runtime";
+        size_t kept = 0;
+        std::error_code keptError;
+        for (const auto& entry : fs::directory_iterator(runtime, keptError))
+            kept += entry.is_regular_file(keptError) ? 1 : 0;
         fs::remove_all(movies);
         fs::create_directories(movies / "dump");
         fs::create_directories(movies / "saves");
@@ -1197,7 +1204,6 @@ namespace
         // variables a launcher may pass on (screenshots, skipped movies, presses) are removed ("": unset). A game whose
         // run-time shaders come later (game.txt: Swap Force's loading screen, after the menus) gets an empty emulated
         // portal (without one it stops at "PORTAL DISCONNECTED") and presses.
-        const Game& game = build.game;
         const std::string portal = game.moviePortal.empty() ? "none" : game.moviePortal;
         const std::pair<const char*, const char*> environment[] = { { "SKY_HEADLESS", "1" },
             { "SKY_DUMP_SHADERS", "dump" }, { "SKY_SETTINGS", "settings.ini" }, { "SKY_SAVE_DIR", "saves" },
@@ -1223,7 +1229,7 @@ namespace
             Progress(uint64_t(std::chrono::duration_cast<std::chrono::seconds>(now - start).count()), 120);
             size_t found = missing().size();
             if (game.movieShaders != 0)
-                return found >= game.movieShaders;
+                return kept + found >= game.movieShaders;
             if (firstNew == std::chrono::steady_clock::time_point{} && found != 0)
                 firstNew = now;
             // The movie shaders come together when the first movie starts: give the rest a few seconds.
@@ -1242,14 +1248,18 @@ namespace
                 ") produced no new shader; movies may not be drawn");
             return false;
         }
-        fs::path runtime = build.work / "shaders" / "input" / "runtime";
         fs::create_directories(runtime);
         for (const fs::path& file : found)
             CopyIfDifferent(file, runtime / file.filename());
-        Log(std::to_string(found.size()) + " shaders built at run time (Bink movies)");
-        if (game.movieShaders != 0 && found.size() < game.movieShaders)
+        size_t total = kept + found.size();
+        Log(std::to_string(total) + " shaders built at run time (Bink movies)");
+        if (total < game.movieShaders)
+        {
+            // No stamp: the next install or update tries again.
             Log("warning: " + std::to_string(game.movieShaders) + " expected; the missing ones' draws are skipped");
-        WriteText(stamp, std::to_string(found.size()) + "\n");
+            return true;
+        }
+        WriteText(stamp, std::to_string(total) + "\n");
         return true;
     }
 

@@ -163,11 +163,17 @@ static void TestGames(const fs::path& root)
     CHECK(games[1].shaders == "igz:/permanent/global.bld" && games[1].runtime == "SGRecomp");
     CHECK(games[2].shaders == "igz:/archives/shaders_xenon.pak" && games[2].runtime == "SSFRecomp");
     CHECK(games[2].xexSha256.size() == 2);
-    CHECK(games[0].moviePortal.empty() && games[0].moviePress.empty() && games[0].movieShaders == 0);
-    CHECK(games[1].moviePortal.empty() && games[1].moviePress.empty() && games[1].movieShaders == 0);
+    CHECK(games[0].moviePortal.empty() && games[0].moviePress.empty() && games[0].movieShaders == 3);
+    CHECK(games[1].moviePortal.empty() && games[1].moviePress.empty() && games[1].movieShaders == 50);
     CHECK(games[2].moviePortal == "emulated" && !games[2].moviePress.empty() && games[2].movieShaders == 7);
     CHECK(games[3].shaders == "igz:all" && games[3].runtime == "TTRecomp");
     CHECK(games[3].moviePortal == "emulated" && games[3].movieShaders == 18);
+    // A short pass of an older kit is not done, so an update repairs the game.
+    CHECK(!MoviePassDone("45\n", 50));
+    CHECK(MoviePassDone("50\n", 50));
+    CHECK(MoviePassDone("51\n", 50));
+    CHECK(!MoviePassDone("", 50));
+    CHECK(MoviePassDone("3\n", 0));
 }
 
 int main(int argc, char** argv)
