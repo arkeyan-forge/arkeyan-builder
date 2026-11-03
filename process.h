@@ -1,4 +1,4 @@
-// Child processes and small host queries for SkyBuild: no shell is involved, arguments are passed as they are.
+// Child processes and small host queries for Arkeyan-Builder: no shell is involved, arguments are passed as they are.
 #pragma once
 
 #include <cstdint>
@@ -20,6 +20,8 @@ struct RunOptions
 
 // Exit code, or -1 when the program could not be started.
 int Run(const std::vector<std::string>& args, const RunOptions& options = {});
+// Why the last Run could not start its program: the Windows error, 0 when it started and on other systems.
+unsigned long RunStartError();
 
 // Sets (or, with an empty value, removes) a variable of this process; children inherit it.
 void SetEnv(const char* name, const std::string& value);

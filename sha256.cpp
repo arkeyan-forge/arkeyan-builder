@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <stdexcept>
 #include <vector>
 
 namespace
@@ -102,9 +103,11 @@ namespace
 
 std::string Sha256File(const std::filesystem::path& path)
 {
+    if (!std::filesystem::is_regular_file(path))
+        throw std::runtime_error("a required SHA-256 input is not a regular file");
     std::ifstream file(path, std::ios::binary);
     if (!file)
-        return {};
+        throw std::runtime_error("cannot open a required file for SHA-256");
     Sha256 sha;
     std::vector<char> buffer(1 << 20);
     while (file)
@@ -112,6 +115,8 @@ std::string Sha256File(const std::filesystem::path& path)
         file.read(buffer.data(), std::streamsize(buffer.size()));
         sha.Update(reinterpret_cast<const uint8_t*>(buffer.data()), size_t(file.gcount()));
     }
+    if (!file.eof() || file.bad())
+        throw std::runtime_error("cannot read a required file for SHA-256");
     return sha.Finish();
 }
 

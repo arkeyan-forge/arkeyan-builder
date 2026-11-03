@@ -1,6 +1,6 @@
-// SkyBuild: builds the game on the player's machine from their disc and the player kit (docs/tools/skybuild.md).
+// Arkeyan-Builder: builds the game on the player's machine from their disc and the player kit (docs/tools/arkeyan-builder.md).
 //
-//   SkyBuild --iso <iso or copied game data folder> --out <game dir> [--kit <kit dir>] [--jobs N] [--toolchain <dir>]
+//   Arkeyan-Builder --iso <iso or copied game data folder> --out <game dir> [--kit <kit dir>] [--jobs N] [--toolchain <dir>]
 //
 // The kit holds several games (kit.txt: games=ssa,giants,swapforce,trapteam). The disc's default.xex, by its SHA-256,
 // identifies one (config/<id>/game.txt); everything below then comes from that game's part of the kit.
@@ -10,15 +10,20 @@
 // (default.xex, its loaded image, the shader archives), the game code (XenonRecomp, a separate program of the kit), the
 // shaders (XenosRecomp, likewise), compiling and linking against the kit's prebuilt runtime, then a short headless run
 // of the new game that saves the shaders it builds at run time (Bink movies) and a rebuild of the shader cache with
-// them. Work files stay in <game dir>/ssabuild-work, so a rerun only redoes what changed.
+// them. Work files stay in <game dir>/arkeyan-work (or its existing ssabuild-work), so a rerun only redoes what changed.
 #include "host/collection/datadir.h"
-#include "host/art/ico.h"
+#include "host/env.h"
+#include <stb_image.h>
 #include "host/xex_title.h"
 #include "game_icon.h"
 #include "game_config.h"
+#include "install_guard.h"
 #include "host/art/game_art.h"
 #include "igz_shaders.h"
+#include "menu_music.h"
+#include "apu/xma_decoder.h"
 #include "process.h"
+#include "shader_cache_literals.h"
 #include "sha256.h"
 #include "version_resource.h"
 #include "vfs.h"
@@ -26,6 +31,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -38,7 +44,7 @@
 namespace
 {
     using namespace skybuild;
-    // The compiler SkyBuild downloads: the one the kit's runtime was built with (tools/make_kit.sh), pinned by SHA-256.
+    // The compiler Arkeyan-Builder downloads: the one the kit's runtime was built with (tools/make_kit.sh), pinned by SHA-256.
     struct Toolchain
     {
         const char* name;
@@ -57,7 +63,7 @@ namespace
     constexpr const char* Exe = ".exe";
 #elif defined(__linux__)
     // zig's clang with its own libc++ and glibc stubs: no system compiler, headers or -dev package is needed, and
-    // the game targets glibc 2.34 whatever the distribution (docs/tools/skybuild.md). The kit records the same version.
+    // the game targets glibc 2.34 whatever the distribution (docs/tools/arkeyan-builder.md). The kit records the same version.
     constexpr const char* ZigVersion = "0.17.0";
     constexpr Toolchain Compiler = { "zig 0.17.0", "zig-x86_64-linux-0.17.0",
         "https://ziglang.org/download/0.17.0/zig-x86_64-linux-0.17.0.tar.xz",
@@ -126,6 +132,7 @@ namespace
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file << text;
+        file.close();
         if (!file)
             Fail("cannot write " + Slashes(path));
     }
@@ -134,6 +141,7 @@ namespace
     {
         std::ofstream file(path, std::ios::binary | std::ios::trunc);
         file.write(static_cast<const char*>(data), std::streamsize(size));
+        file.close();
         if (!file)
             Fail("cannot write " + Slashes(path));
     }
@@ -153,12 +161,11 @@ namespace
     // whether a result is still valid, where a time or a path would change with each unpacked kit.
     std::string ContentDigest(const fs::path& path)
     {
-        std::error_code error;
-        if (fs::is_regular_file(path, error))
+        if (fs::is_regular_file(path))
             return Sha256File(path);
         std::map<std::string, std::string> files;
-        for (const auto& entry : fs::recursive_directory_iterator(path, error))
-            if (entry.is_regular_file(error))
+        for (const auto& entry : fs::recursive_directory_iterator(path))
+            if (entry.is_regular_file())
                 files[Slashes(fs::relative(entry.path(), path))] = Sha256File(entry.path());
         std::string text;
         for (const auto& [name, sha] : files)
@@ -184,6 +191,8 @@ namespace
         fs::path toolchain;
         unsigned jobs = 0;
         bool iconOnly = false; // --icon-only: make the game's icon (GameIcon) and stop; a check, no build
+        fs::path
+            menuMusic; // --menu-music <file.wav>: write the game's main menu theme there (MenuMusic) and stop; no build
     };
 
     struct Build
@@ -216,12 +225,7 @@ namespace
         return text;
     }
 
-    fs::file_time_type TimeOf(const fs::path& path)
-    {
-        std::error_code error;
-        auto time = fs::last_write_time(path, error);
-        return error ? fs::file_time_type::min() : time;
-    }
+    fs::file_time_type TimeOf(const fs::path& path) { return fs::last_write_time(path); }
 
     // One argument per line, ${NAME} replaced; a line that is exactly ${OBJECTS} becomes the object list.
     std::vector<std::string> ExpandTemplate(
@@ -396,7 +400,7 @@ namespace
         }
 #ifdef __linux__
         if (build.kit["zig"] != ZigVersion)
-            Fail("the kit was built with zig " + build.kit["zig"] + ", this SkyBuild uses " + ZigVersion);
+            Fail("the kit was built with zig " + build.kit["zig"] + ", this Arkeyan-Builder uses " + ZigVersion);
         fs::path cache = build.options.toolchain;
         fs::path root;
         if (!cache.empty() && fs::exists(cache / Compiler.compiler))
@@ -500,23 +504,22 @@ namespace
         fs::path stamp = disc / "stamp.txt";
         std::string expected = DiscStamp(build);
         bool fromArchive = build.game.shaders.rfind("igz:", 0) == 0;
-        // What the shader step needs is on disk: the XEX image (and the archives) for "lsa", the containers for "igz".
-        auto haveShaders = [&]() {
-            if (!fromArchive)
-                return fs::exists(input / "default.xex.image");
-            std::error_code error;
-            for (const auto& entry : fs::directory_iterator(input, error))
-                if (entry.path().extension() == ".vs" || entry.path().extension() == ".ps")
-                    return true;
-            return false;
-        };
-        if (ReadText(stamp) == expected && fs::exists(disc / "default.xex") && haveShaders())
+        size_t unsupported = 0;
+        // Every extracted input must survive; one surviving container is not a complete extraction.
+        std::string inventory = DiscShaderInventory(input);
+        if (ReadText(stamp) == expected && fs::exists(disc / "default.xex") && !inventory.empty() &&
+            ReadText(disc / "shaders.txt") == inventory)
         {
+            if (auto warning = ReadText(disc / "warnings.txt"); !warning.empty())
+                Emit("warn", warning);
             Log("up to date");
             return;
         }
         fs::remove(stamp);
         fs::create_directories(disc);
+        // A changed disc or incomplete extraction also invalidates its captured run-time shaders.
+        fs::remove_all(input);
+        fs::remove_all(build.work / "movies");
         fs::create_directories(input);
 
         DiscFileSystem fileSystem;
@@ -539,6 +542,7 @@ namespace
             Log(path + ": " + std::to_string(extraction.entries) + " entries, " + std::to_string(extraction.igz) +
                 " IGZ, " + std::to_string(extraction.vertex + extraction.pixel) + " shaders (" +
                 std::to_string(extraction.vertex) + " vertex, " + std::to_string(extraction.pixel) + " pixel)");
+            unsupported += extraction.unsupported;
             if (extraction.vertex + extraction.pixel == 0)
                 Fail("no shader found in " + path + ": is this the right disc?");
             Progress(3, 3);
@@ -552,18 +556,74 @@ namespace
             auto paths = ShaderArchivePaths(build.game.shaders, files);
             if (paths.empty())
                 Fail("no shader archive found: is this " + build.game.name + "?");
+            // Decoding the archives (LZMA) is the long part: one per job at once, then written in disc order, so the
+            // files, the counts and the log are those of a one-by-one pass.
+            struct Decoded
+            {
+                bool ready = false, ok = false;
+                ShaderExtraction extraction;
+                std::vector<ArchiveShader> shaders;
+            };
+            std::vector<Decoded> decoded(paths.size());
+            std::mutex mutex;
+            std::condition_variable readyChanged;
+            std::atomic<size_t> next = 0;
+            std::atomic<bool> stop = false;
+            std::vector<std::thread> workers;
+            struct JoinOnExit // a failure below must not leave a thread running
+            {
+                std::atomic<bool>& stop;
+                std::vector<std::thread>& workers;
+                ~JoinOnExit()
+                {
+                    stop = true;
+                    for (auto& worker : workers)
+                        worker.join();
+                }
+            } joinOnExit{ stop, workers };
+            for (unsigned t = 0; t < std::min<size_t>(build.options.jobs, paths.size()); t++)
+            {
+                workers.emplace_back([&]() {
+                    for (size_t i; !stop && (i = next++) < paths.size();)
+                    {
+                        Decoded result;
+                        try
+                        {
+                            std::vector<uint8_t> archive = fileSystem.ReadAll(paths[i]);
+                            result.ok =
+                                !archive.empty() && CollectArchiveShaders(archive, result.extraction, result.shaders);
+                        }
+                        catch (const std::exception&)
+                        {
+                            result.ok = false;
+                        }
+                        std::lock_guard lock(mutex);
+                        decoded[i] = std::move(result);
+                        decoded[i].ready = true;
+                        readyChanged.notify_all();
+                    }
+                });
+            }
             std::set<std::string> seen;
             size_t total = 0;
             for (size_t i = 0; i < paths.size(); i++)
             {
                 const auto& path = paths[i];
-                std::vector<uint8_t> archive = fileSystem.ReadAll(path);
-                ShaderExtraction extraction;
-                if (archive.empty() || !ExtractArchiveShaders(archive, input, extraction, &seen))
+                Decoded current;
+                {
+                    std::unique_lock lock(mutex);
+                    readyChanged.wait(lock, [&]() { return decoded[i].ready; });
+                    current = std::move(decoded[i]);
+                }
+                if (!current.ok)
                     Fail("the disc has no readable " + path + ": is it " + build.game.name + "?");
+                ShaderExtraction& extraction = current.extraction;
+                if (!WriteArchiveShaders(current.shaders, input, extraction, seen))
+                    Fail("cannot write the shaders of " + path);
                 Log(path + ": " + std::to_string(extraction.entries) + " entries, " + std::to_string(extraction.igz) +
                     " IGZ, " + std::to_string(extraction.vertex + extraction.pixel) + " shaders (" +
                     std::to_string(extraction.vertex) + " vertex, " + std::to_string(extraction.pixel) + " pixel)");
+                unsupported += extraction.unsupported;
                 total += extraction.vertex + extraction.pixel;
                 Progress(i + 1, paths.size());
             }
@@ -590,6 +650,14 @@ namespace
                 " KB");
             Progress(4, 4);
         }
+        std::string warning;
+        if (unsupported)
+            warning = std::to_string(unsupported) +
+                      " unreadable or unsupported archive entries; some shaders may be missing. Update the game tools.";
+        WriteText(disc / "warnings.txt", warning);
+        if (!warning.empty())
+            Emit("warn", warning);
+        WriteText(disc / "shaders.txt", DiscShaderInventory(input));
         WriteText(stamp, expected);
     }
 
@@ -621,7 +689,7 @@ namespace
         }
 
         if (build.cross)
-            Fail("a cross build reuses ppc/ and the shader cache of a native run (docs/tools/skybuild.md)");
+            Fail("a cross build reuses ppc/ and the shader cache of a native run (docs/tools/arkeyan-builder.md)");
         // XenonRecomp reads its paths relative to the TOML (../private/default.xex, ../ppc): lay it out that way, with
         // relative paths only (its file APIs may not take UTF-8).
         fs::path xenon = build.work / "xenon";
@@ -673,6 +741,8 @@ namespace
 
     // --- shaders ---------------------------------------------------------------------------------------------------
 
+    std::string RunStartHint(const std::string& program) { return StartErrorHint(RunStartError(), program); }
+
     std::string RuntimeShaderList(const Build& build)
     {
         std::set<std::string> names;
@@ -685,6 +755,32 @@ namespace
         return list;
     }
 
+    void RequireRuntimeTranslations(const Build& build, const fs::path& cache)
+    {
+        const auto hashes = ShaderCacheHashes(cache);
+        for (const auto& [name, path] : RuntimeShaders(build.work / "shaders" / "input" / "runtime"))
+            if (!hashes.count(strtoull(path.stem().string().c_str(), nullptr, 16)))
+                Fail("required run-time shader " + name +
+                     " was not translated; install incomplete, retry with updated game tools");
+    }
+
+    void ShaderWarnings(const Build& build)
+    {
+        std::ifstream log(build.work / "logs" / "xenosrecomp.log");
+        unsigned skipped = 0, withoutDxil = 0;
+        for (std::string line; std::getline(log, line);)
+        {
+            skipped += line.rfind("Skipped ", 0) == 0;
+            withoutDxil += line.rfind("No DXIL for ", 0) == 0;
+        }
+        if (skipped)
+            Emit("warn", std::to_string(skipped) + " disc shaders could not be translated; some pictures may be "
+                                                   "missing. Update the game tools and retry.");
+        if (withoutDxil && build.platform == "windows-x64")
+            Emit("warn", std::to_string(withoutDxil) +
+                             " shaders have no D3D12 version; use Vulkan in video settings or update the game tools.");
+    }
+
     void TranslateShaders(Build& build)
     {
         Step("shaders", "Translating the shaders");
@@ -694,16 +790,33 @@ namespace
         // The translator and shader_common.h decide the translated text; the compiled results are kept by the text's
         // hash (below), so a new translator redoes the translation but only compiles what changed.
         fs::path xenos = build.options.kit / "bin" / (std::string("XenosRecomp") + Exe);
-        std::string expected = DiscStamp(build) + "runtime=" + RuntimeShaderList(build) +
-                               "\ntranslator=" + Sha256File(xenos) +
-                               "\ncommon=" + Sha256File(build.options.kit / "share" / "shader_common.h") + "\n";
+        // Only the streams the game reads are compiled: the AIR on macOS, the SPIR-V on Linux, the DXIL and the SPIR-V
+        // on Windows. SKY_WINDOWS_SHADERS=1 adds Windows' two on another OS, for a cross build of a Windows kit from this
+        // run's cache (a developer check); a player's install never sets it.
+        bool windows = build.platform == "windows-x64";
+        std::string streams = windows ? "dxil,spirv" : build.macos ? "air" : "spirv";
+        if (!windows && GetEnv("SKY_WINDOWS_SHADERS") == "1")
+            streams = build.macos ? "dxil,spirv,air" : "dxil,spirv";
+        std::string expected =
+            DiscStamp(build) + "runtime=" + RuntimeShaderList(build) + "\ntranslator=" + Sha256File(xenos) +
+            "\ncommon=" + Sha256File(build.options.kit / "share" / "shader_common.h") + "\nstreams=" + streams + "\n";
         if (ReadText(stamp) == expected && fs::exists(cache))
         {
+            RequireRuntimeTranslations(build, cache);
+            ShaderWarnings(build);
             Log("up to date");
             return;
         }
         if (build.cross)
-            Fail("a cross build reuses ppc/ and the shader cache of a native run (docs/tools/skybuild.md)");
+        {
+            std::string text = ReadText(cache);
+            if (text.empty() || text.find("g_dxilCacheDecompressedSize = 0;") != std::string::npos ||
+                text.find("g_spirvCacheDecompressedSize = 0;") != std::string::npos)
+                Fail("a cross build reuses ppc/ and the shader cache of a native run made with SKY_WINDOWS_SHADERS=1 "
+                     "(docs/tools/arkeyan-builder.md)");
+            Log("the native run's shader cache, with the Windows shaders");
+            return;
+        }
         fs::remove(stamp);
         fs::copy_file(build.options.kit / "share" / "shader_common.h", shaders / "shader_common.h",
             fs::copy_options::overwrite_existing);
@@ -725,8 +838,7 @@ namespace
         std::string cacheId = "compilers=" + Sha256Text(compilers) + "\n";
         if (ReadText(cacheStamp) != cacheId)
         {
-            std::error_code error;
-            fs::remove_all(shaders / "cache", error);
+            fs::remove_all(shaders / "cache");
             WriteText(cacheStamp, cacheId);
         }
 
@@ -754,13 +866,14 @@ namespace
             }
             return false;
         };
-        int result = Run(
-            { Slashes(xenos), "shaders/input", "shaders/shader_cache.cpp", "shaders/shader_common.h", "shaders/cache" },
+        fs::remove(shaders / "shader_cache.cpp"); // a successful child must produce this run's output
+        int result = Run({ Slashes(xenos), "shaders/input", "shaders/shader_cache.cpp", "shaders/shader_common.h",
+                             "shaders/cache", streams },
             run);
         if (result != 0 || !fs::exists(shaders / "shader_cache.cpp"))
         {
             LogTail(run.log);
-            Fail("XenosRecomp failed (exit code " + std::to_string(result) + ")");
+            Fail("XenosRecomp failed (exit code " + std::to_string(result) + ")" + RunStartHint("XenosRecomp"));
         }
         // The shaders XenosRecomp could not translate (the movie step must not feed them back).
         std::string skipped;
@@ -773,6 +886,10 @@ namespace
                 skipped += line.substr(8, 16) + "\n";
         }
         WriteText(shaders / "skipped.txt", skipped);
+        RequireRuntimeTranslations(build, shaders / "shader_cache.cpp");
+        if (ShaderCacheHashes(shaders / "shader_cache.cpp").empty())
+            Fail("XenosRecomp produced no translated shaders; install incomplete");
+        ShaderWarnings(build);
         CopyIfDifferent(shaders / "shader_cache.cpp", cache);
         fs::remove(shaders / "shader_cache.cpp");
         WriteText(stamp, expected);
@@ -780,7 +897,7 @@ namespace
 
     // --- compile and link ------------------------------------------------------------------------------------------
 
-    // zig's copies of what it just built (Linux): SkyBuild keeps its own objects in obj/.
+    // zig's copies of what it just built (Linux): Arkeyan-Builder keeps its own objects in obj/.
     void ClearCompilerCache(const Build& build)
     {
         std::error_code error;
@@ -833,9 +950,10 @@ namespace
         for (const fs::path& source : sources)
         {
             std::string name = Slashes(source.stem());
-            build.vars["SRC"] = "ppc/" + Slashes(source.filename());
-            build.vars["OBJ"] = "obj/" + name + ".o";
             bool cache = name == "shader_cache";
+            // The shader cache is compiled from a copy with its bytes as string literals (shader_cache_literals.h).
+            build.vars["SRC"] = cache ? "obj/shader_cache_literals.cpp" : "ppc/" + Slashes(source.filename());
+            build.vars["OBJ"] = "obj/" + name + ".o";
             std::vector<std::string> args = ExpandTemplate(build, cache ? "shader_cache.args" : "compile.args", {});
             fs::path rsp = obj / (name + ".rsp");
             fs::path keyFile = obj / (name + ".key");
@@ -847,6 +965,8 @@ namespace
             {
                 fs::remove(object);
                 fs::remove(keyFile);
+                if (cache)
+                    WriteText(obj / "shader_cache_literals.cpp", ShaderCacheLiterals(ReadText(source)));
                 jobs.push_back({ source, args, fs::file_size(source), keyFile, key });
             }
         }
@@ -881,31 +1001,48 @@ namespace
                     if (index >= jobs.size())
                         return;
                     const Job& job = jobs[index];
-                    RunOptions run;
-                    run.cwd = build.work;
-                    run.log = obj / (Slashes(job.source.stem()) + ".log");
-                    int result = Run(job.args, run);
-                    if (result != 0)
+                    try
+                    {
+                        RunOptions run;
+                        run.cwd = build.work;
+                        run.log = obj / (Slashes(job.source.stem()) + ".log");
+                        int result = Run(job.args, run);
+                        if (result != 0)
+                        {
+                            std::lock_guard lock(failureMutex);
+                            if (!failed.exchange(true))
+                            {
+                                LogTail(run.log, 30);
+                                failure = "compiling " + Slashes(job.source.filename()) + " failed (exit code " +
+                                          std::to_string(result) + ")";
+                            }
+                            return;
+                        }
+                        std::error_code error;
+                        fs::remove(run.log, error);
+                        WriteText(job.keyFile, job.key);
+                        Progress(++finished, total);
+                    }
+                    catch (const Failure& problem)
                     {
                         std::lock_guard lock(failureMutex);
                         if (!failed.exchange(true))
-                        {
-                            LogTail(run.log, 30);
-                            failure = "compiling " + Slashes(job.source.filename()) + " failed (exit code " +
-                                      std::to_string(result) + ")";
-                        }
-                        return;
+                            failure = problem.message;
                     }
-                    std::error_code error;
-                    fs::remove(run.log, error);
-                    WriteText(job.keyFile, job.key);
-                    Progress(++finished, total);
+                    catch (const std::exception& problem)
+                    {
+                        std::lock_guard lock(failureMutex);
+                        if (!failed.exchange(true))
+                            failure = problem.what();
+                    }
                 }
             });
         }
         for (auto& thread : threads)
             thread.join();
         ClearCompilerCache(build);
+        std::error_code error;
+        fs::remove(obj / "shader_cache_literals.cpp", error);
         if (failed)
             Fail(failure);
     }
@@ -923,101 +1060,68 @@ namespace
         }
     }
 
-    // The game's icon: its disc title logo, cut to its visible pixels and fitted centred into a transparent square (the same
-    // for every game: art::ReadLogo knows where each keeps its logo, FitLogoIcon), as game_icon.png (512 px) in the game's
-    // folder, which the window icon and Skylauncher's shortcuts load. A copy of 256 px is for the Windows .ico (MakeIco).
-    // When the disc has no readable logo, the dashboard icon of default.xex is used as it is. Returns the PNG's path, or ""
-    // when there is no icon at all. Kept while the disc and this version of the recipe are the same.
+    // One disc-derived icon family for the executable, window, bundle and desktop shortcuts.
+    // All sizes are rendered from the same cropped source with the same margin and transparency.
     struct GameIconFiles
     {
-        fs::path png, icoPng;
+        fs::path png, ico, icns;
     };
 
     GameIconFiles GameIcon(const Build& build)
     {
         fs::path dir = build.work / "icon";
-        GameIconFiles files{ build.options.out / "game_icon.png", dir / "game_icon_256.png" };
+        GameIconFiles files{ build.options.out / "game_icon.png", build.options.out / "game_icon.ico",
+            build.options.out / "game_icon.icns" };
         fs::path keyFile = dir / "game_icon.key";
-        std::string key = DiscStamp(build) + "recipe=1\n";
-        if (fs::exists(files.png) && fs::exists(files.icoPng) && ReadText(keyFile) == key)
+        std::string key = DiscStamp(build) + "recipe=2\n";
+        if (fs::exists(files.png) && fs::exists(files.ico) && fs::exists(files.icns) && ReadText(keyFile) == key)
             return files;
         fs::create_directories(dir);
         DiscFileSystem fileSystem;
         if (!fileSystem.Open(Slashes(build.options.iso).c_str()))
             Fail("not an Xbox 360 disc image: " + Slashes(build.options.iso));
-        std::vector<uint8_t> big, small;
         art::Image logo;
-        if (art::ReadLogo(build.game.id, art::ReadFrom(fileSystem), logo))
+        if (!art::ReadLogo(build.game.id, art::ReadFrom(fileSystem), logo) || FitLogoIcon(logo, 16).empty())
         {
-            big = FitLogoIcon(logo, 512);
-            small = FitLogoIcon(logo, 256);
+            auto png = ReadTitleMetadata(fileSystem.ReadAll("default.xex")).iconPng;
+            int width = 0, height = 0, channels = 0;
+            if (auto* pixels = stbi_load_from_memory(png.data(), int(png.size()), &width, &height, &channels, 4))
+            {
+                logo.width = uint32_t(width);
+                logo.height = uint32_t(height);
+                logo.rgba.resize(size_t(width) * height);
+                memcpy(logo.rgba.data(), pixels, logo.rgba.size() * 4);
+                stbi_image_free(pixels);
+            }
+            Log("icon: no readable logo, fitting the disc's title icon with the same recipe");
         }
-        if (big.empty() || small.empty())
+        auto png = FitLogoIcon(logo, 512), ico = LogoIco(logo), icns = LogoIcns(logo);
+        if (png.empty() || ico.empty() || icns.empty())
         {
-            std::vector<uint8_t> xex = fileSystem.ReadAll("default.xex");
-            big = small = ReadTitleMetadata(xex).iconPng;
-            Log(big.empty() ? "icon: no logo and no title icon on the disc"
-                            : "icon: no readable logo, using the title icon of default.xex");
-        }
-        else
-            Log("icon: the game's logo, fitted into a square");
-        if (big.empty())
+            // Do not leave a previous disc's icon behind.
+            for (const auto& file : { files.png, files.ico, files.icns, keyFile })
+                fs::remove(file);
+            Log("icon: no readable logo or title icon on the disc; platform default icons will be used");
             return {};
+        }
         fs::create_directories(build.options.out);
-        WriteBytes(files.png, big.data(), big.size());
-        WriteBytes(files.icoPng, small.data(), small.size());
+        WriteBytes(files.png, png.data(), png.size());
+        WriteBytes(files.ico, ico.data(), ico.size());
+        WriteBytes(files.icns, icns.data(), icns.size());
         WriteText(keyFile, key);
+        Log("icon: the disc's art, fitted into one icon family for every platform");
         return files;
     }
 
-    // macOS: the game's icon as the bundle's .icns (sips scales game_icon.png, iconutil packs it). Returns the kit's neutral
-    // icon when there is no icon or a tool fails: the bundle always has one.
     fs::path BundleIcon(const Build& build)
     {
-        fs::path neutral = build.options.kit / "res" / "SSARecomp.icns";
-        fs::path dir = build.work / "icon";
-        fs::path icns = dir / "SSARecomp.icns";
-        GameIconFiles files = GameIcon(build);
-        if (files.png.empty())
-        {
-            Log("icon: the disc has no icon, using the kit's");
-            return neutral;
-        }
-        std::error_code error;
-        if (fs::exists(icns) && fs::last_write_time(icns, error) >= fs::last_write_time(files.png, error))
-            return icns;
-        fs::path set = dir / "SSARecomp.iconset";
-        fs::remove_all(set, error);
-        fs::create_directories(set);
-        RunOptions run;
-        run.log = build.work / "logs" / "icon.log";
-        bool ok = true;
-        // The sizes an iconset holds: 16, 32, 128, 256 and 512 points, each at 1x and 2x.
-        for (int points : { 16, 32, 128, 256, 512 })
-        {
-            for (int scale : { 1, 2 })
-            {
-                std::string pixels = std::to_string(points * scale);
-                std::string name = "icon_" + std::to_string(points) + "x" + std::to_string(points) +
-                                   (scale == 2 ? "@2x" : "") + ".png";
-                ok = ok &&
-                     Run({ "sips", "-z", pixels, pixels, Slashes(files.png), "--out", Slashes(set / name) }, run) == 0;
-            }
-        }
-        ok = ok && Run({ "iconutil", "-c", "icns", "-o", Slashes(icns), Slashes(set) }, run) == 0;
-        if (!ok || !fs::exists(icns))
-        {
-            LogTail(run.log);
-            Log("icon: could not make the game's icon, using the kit's");
-            return neutral;
-        }
-        Log("icon: the game's own");
-        return icns;
+        auto files = GameIcon(build);
+        return files.icns.empty() ? build.options.kit / "res" / "ArkeyanRuntime.icns" : files.icns;
     }
 
     // Windows: the executable's resources, which windres (llvm-mingw's) turns into an object linked with the game: its
-    // VERSIONINFO and, when the disc has one, the game's icon, game_icon_256.png as an .ico (one PNG entry, ico.h). Returns
-    // the object's path relative to the build folder, or "" when a tool fails: the executable then has neither, as before.
+    // VERSIONINFO and the complete disc-derived .ico family. Returns
+    // the object's path relative to the build folder. A resource compiler failure stops the build.
     std::string ExecutableResources(Build& build)
     {
         fs::path dir = build.work / "icon";
@@ -1029,19 +1133,16 @@ namespace
         GameIconFiles files = GameIcon(build);
         std::vector<uint8_t> ico;
         if (files.png.empty())
-            Log("icon: the disc has no icon, the executable gets none");
+            Emit("warn", "icon: the disc has no icon, the executable gets none");
         else
         {
-            std::string bytes = ReadText(files.icoPng);
-            ico = MakeIco(std::vector<uint8_t>(bytes.begin(), bytes.end()));
-            if (ico.empty())
-                Log("icon: the game's icon is not a PNG the .ico takes, the executable gets none");
-            else
-                rc = "1 ICON \"game_icon.ico\"\n" + rc;
+            std::string bytes = ReadText(files.ico);
+            ico.assign(bytes.begin(), bytes.end());
+            rc = "1 ICON \"game_icon.ico\"\n" + rc;
         }
         std::error_code error;
         if (fs::exists(object) && fs::exists(script) && ReadText(script) == rc &&
-            (ico.empty() || fs::last_write_time(object, error) >= fs::last_write_time(files.icoPng, error)))
+            (ico.empty() || fs::last_write_time(object, error) >= fs::last_write_time(files.ico, error)))
             return "icon/game_icon.o";
         if (!ico.empty())
             WriteBytes(dir / "game_icon.ico", ico.data(), ico.size());
@@ -1051,11 +1152,11 @@ namespace
         RunOptions run;
         run.cwd = dir;
         run.log = build.work / "logs" / "icon.log";
-        if (Run({ Slashes(windres), "-O", "coff", "-o", "game_icon.o", "game_icon.rc" }, run) != 0 ||
+        if (Run({ Slashes(windres), "--output-format=coff", "--output=game_icon.o", "game_icon.rc" }, run) != 0 ||
             !fs::exists(object))
         {
             LogTail(run.log);
-            Log("icon: could not embed the game's resources, the executable gets no icon and no version");
+            Emit("warn", "icon: could not embed the game's resources, the executable gets no icon and no version");
             return "";
         }
         if (!ico.empty())
@@ -1067,16 +1168,19 @@ namespace
     {
         Step("link", "Linking the game");
         fs::path res = build.options.kit / "res";
-        const std::string& name = build.game.runtime; // SSARecomp, SGRecomp
+        const std::string& name = build.game.runtime; // passed as one argument, including spaces and apostrophes
         fs::path app = build.options.out / (name + ".app");
         fs::create_directories(build.options.out);
+        GameIcon(build); // Linux needs the same window and shortcut icons too.
         if (build.macos)
         {
             fs::path contents = app / "Contents";
             fs::create_directories(contents / "MacOS");
             fs::create_directories(contents / "Resources");
             CopyIfDifferent(res / build.game.id / "Info.plist", contents / "Info.plist");
-            CopyIfDifferent(BundleIcon(build), contents / "Resources" / "SSARecomp.icns"); // the plist names it
+            CopyIfDifferent(BundleIcon(build), contents / "Resources" / "ArkeyanRuntime.icns"); // the plist names it
+            if (fs::exists(build.options.out / "game_icon.png"))
+                CopyIfDifferent(build.options.out / "game_icon.png", contents / "Resources" / "game_icon.png");
             CopyIfDifferent(res / "THIRD_PARTY_NOTICES.md", contents / "Resources" / "THIRD_PARTY_NOTICES.md");
             CopyTree(res / "fonts", contents / "Resources" / "fonts");
             build.exe = contents / "MacOS" / name;
@@ -1088,6 +1192,9 @@ namespace
             build.exe = build.options.out / (build.platform == "windows-x64" ? name + ".exe" : name);
         }
         build.vars["OUT"] = Slashes(build.exe);
+        if (build.platform == "linux-x64")
+            WriteText(build.options.out / "game.desktop",
+                GameDesktopEntry(build.game.name, Slashes(build.exe), Slashes(build.options.out / "game_icon.png")));
         std::vector<std::string> objects = ObjectList(build);
         if (build.platform == "windows-x64")
             if (std::string resources = ExecutableResources(build); !resources.empty())
@@ -1108,23 +1215,21 @@ namespace
         bool fresh = fs::exists(build.exe) && ReadText(linkKey) == key;
         for (const std::string& object : objects)
             fresh = fresh && TimeOf(build.work / object) <= TimeOf(build.exe);
-        if (fresh)
+        if (!fresh)
         {
-            Log("up to date");
-            return;
+            fs::remove(linkKey);
+            RunOptions run;
+            run.cwd = build.work;
+            run.log = build.work / "logs" / "link.log";
+            int result = Run(args, run);
+            ClearCompilerCache(build);
+            if (result != 0)
+            {
+                LogTail(run.log, 30);
+                Fail("linking failed (exit code " + std::to_string(result) + "); if the game is running, close it");
+            }
         }
-
-        fs::remove(linkKey);
-        RunOptions run;
-        run.cwd = build.work;
-        run.log = build.work / "logs" / "link.log";
-        int result = Run(args, run);
-        ClearCompilerCache(build);
-        if (result != 0)
-        {
-            LogTail(run.log, 30);
-            Fail("linking failed (exit code " + std::to_string(result) + "); if the game is running, close it");
-        }
+        // Resource copies above can change an up-to-date bundle too: seal its final icon before retiring the old app.
         if (build.macos)
         {
             RunOptions sign;
@@ -1135,8 +1240,12 @@ namespace
                 Fail("codesign failed");
             }
         }
+        skybuild::RemoveLegacyRuntime(build.game, build.options.out,
+            build.macos                       ? ".app"
+            : build.platform == "windows-x64" ? ".exe"
+                                              : "");
         WriteText(linkKey, key);
-        Log(Slashes(build.exe) + ": " + std::to_string(fs::file_size(build.exe) >> 20) + " MB");
+        Log(fresh ? "up to date" : Slashes(build.exe) + ": " + std::to_string(fs::file_size(build.exe) >> 20) + " MB");
     }
 
     // --- movie shaders ---------------------------------------------------------------------------------------------
@@ -1144,16 +1253,7 @@ namespace
     // Hashes of the shader cache's entries ("\t{ 0x<hash>, ...").
     std::set<uint64_t> CachedShaders(const Build& build)
     {
-        std::set<uint64_t> hashes;
-        std::ifstream file(build.work / "ppc" / "shader_cache.cpp");
-        for (std::string line; std::getline(file, line);)
-        {
-            if (line.rfind("\t{ 0x", 0) == 0)
-                hashes.insert(strtoull(line.c_str() + 5, nullptr, 16));
-            else if (!hashes.empty())
-                break;
-        }
-        return hashes;
+        return ShaderCacheHashes(build.work / "ppc" / "shader_cache.cpp");
     }
 
     // The game builds the Bink movie shaders at run time (they are in no archive): run it headless for a few seconds
@@ -1164,22 +1264,27 @@ namespace
         fs::path movies = build.work / "movies";
         fs::path stamp = movies / "done.txt";
         const Game& game = build.game;
-        if (fs::exists(stamp) && MoviePassDone(ReadText(stamp), game.movieShaders))
+        if (game.movieShaders == 0)
+            Emit("warn",
+                "the kit has no run-time shader target; completeness cannot be verified. Update the game tools.");
+        fs::path runtime = build.work / "shaders" / "input" / "runtime";
+        const auto retained = RuntimeShaders(runtime);
+        const size_t kept = retained.size();
+        if (fs::exists(stamp) && MoviePassDone(ReadText(stamp), game.movieShaders) && kept >= game.movieShaders &&
+            kept > 0)
         {
             Log("up to date");
             return false;
         }
+        // A previous capture may be complete even if its rebuild failed. The main flow retries that rebuild first.
+        if (game.movieShaders != 0 && kept >= game.movieShaders)
+            return false;
         if (build.cross)
         {
-            Log("skipped: the game cannot run on this OS");
-            return false;
+            Fail("run-time shaders are incomplete and the game cannot run on this OS; finish the install with the "
+                 "native kit");
         }
         // What an earlier pass found stays: an update that repairs a short pass only looks for the rest.
-        fs::path runtime = build.work / "shaders" / "input" / "runtime";
-        size_t kept = 0;
-        std::error_code keptError;
-        for (const auto& entry : fs::directory_iterator(runtime, keptError))
-            kept += entry.is_regular_file(keptError) ? 1 : 0;
         fs::remove_all(movies);
         fs::create_directories(movies / "dump");
         fs::create_directories(movies / "saves");
@@ -1192,10 +1297,9 @@ namespace
             cached.insert(strtoull(line.c_str(), nullptr, 16));
         auto missing = [&]() {
             std::vector<fs::path> files;
-            std::error_code error;
-            for (const auto& entry : fs::directory_iterator(movies / "dump", error))
-                if (cached.count(strtoull(Slashes(entry.path().stem()).c_str(), nullptr, 16)) == 0)
-                    files.push_back(entry.path());
+            for (const auto& [name, path] : RuntimeShaders(movies / "dump"))
+                if (!retained.count(name) && cached.count(strtoull(path.stem().string().c_str(), nullptr, 16)) == 0)
+                    files.push_back(path);
             return files;
         };
 
@@ -1212,10 +1316,21 @@ namespace
             { "SKY_PRESS", game.moviePress.c_str() }, { "SKYLANDERS_DATA", "data" }, { "SKY_LAUNCHER_INI", "none.ini" },
             { "SKY_LOG", "runtime.log" } };
         std::vector<std::string> previous; // the caller's values, put back after the run
+        // Each name's older spellings (SSA_X, SKYLAUNCHER_X...) go too: the game reads them when the current one is unset,
+        // and a launcher passes its test variables on under them (a screenshot folder there made the game skip the pass).
+        std::vector<std::pair<std::string, std::string>> older; // name, the caller's value
         for (const auto& [name, value] : environment)
         {
             previous.push_back(GetEnv(name));
             SetEnv(name, value);
+            std::string first, second;
+            skyenv::OlderNames(name, first, second);
+            for (const std::string& alias : { first, second })
+                if (!alias.empty())
+                {
+                    older.emplace_back(alias, GetEnv(alias.c_str()));
+                    SetEnv(alias.c_str(), "");
+                }
         }
 
         auto start = std::chrono::steady_clock::now();
@@ -1239,14 +1354,15 @@ namespace
         int result = Run({ ShortPath(build.exe), ShortPath(build.options.iso) }, run);
         for (size_t i = 0; i < std::size(environment); i++)
             SetEnv(environment[i].first, previous[i]);
+        for (const auto& [alias, value] : older)
+            SetEnv(alias.c_str(), value);
 
         std::vector<fs::path> found = missing();
         if (found.empty())
         {
             LogTail(run.log, 15);
-            Log("warning: the run (exit code " + std::to_string(result) +
-                ") produced no new shader; movies may not be drawn");
-            return false;
+            Fail("the movie pass (exit code " + std::to_string(result) +
+                 ") produced no new shader; install incomplete, retry the install" + RunStartHint(build.game.runtime));
         }
         fs::create_directories(runtime);
         for (const fs::path& file : found)
@@ -1256,17 +1372,45 @@ namespace
         if (total < game.movieShaders)
         {
             // No stamp: the next install or update tries again.
-            Log("warning: " + std::to_string(game.movieShaders) + " expected; the missing ones' draws are skipped");
-            return true;
+            Fail("the movie pass collected " + std::to_string(total) + " of " + std::to_string(game.movieShaders) +
+                 " required run-time shaders (exit code " + std::to_string(result) +
+                 "); install incomplete, retry the install to resume" + RunStartHint(game.runtime));
         }
-        WriteText(stamp, std::to_string(total) + "\n");
+        // Stamp only after the shaders have been translated, compiled and linked successfully.
         return true;
+    }
+
+    // --menu-music: the game's main menu theme, decoded from the disc into a WAV for the launcher's game page
+    // (menu_music.h, docs/runtime/host/game_music.md). The kit links the runtime's XMA decoder for it; the launcher has none.
+    void MenuMusic(const Build& build)
+    {
+        Step("music", "Reading the menu music");
+        DiscFileSystem fileSystem;
+        if (!fileSystem.Open(Slashes(build.options.iso).c_str()))
+            Fail("not an Xbox 360 disc image: " + Slashes(build.options.iso));
+        std::string error, source;
+        std::optional<music::XmaStream> stream =
+            music::ReadMenuMusic(build.game.id, art::ReadFrom(fileSystem), error, &source);
+        if (!stream)
+            Fail("menu music: " + error);
+        std::unique_ptr<XmaFrameDecoder> decoder = CreateXmaFrameDecoder();
+        if (!decoder)
+            Fail("menu music: this Arkeyan-Builder was built without the XMA decoder");
+        Log("menu music: " + source + " (" + stream->container + ", " + std::to_string(stream->sampleRate) + " Hz, " +
+            std::to_string(stream->channels) + " channels, " + std::to_string(stream->samples) + " samples)");
+        std::vector<int16_t> pcm = music::Decode(*decoder, *stream);
+        if (pcm.empty())
+            Fail("menu music: incomplete or invalid XMA2 stream");
+        if (!music::WriteWav(
+                build.options.menuMusic, pcm, stream->sampleRate, stream->channels, stream->loopStart, stream->loopEnd))
+            Fail("menu music: cannot write " + Slashes(build.options.menuMusic));
     }
 
     void Usage()
     {
-        fprintf(stderr, "usage: SkyBuild --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
-                        "[--toolchain <dir>] [--icon-only]\n");
+        fprintf(stderr, "usage: Arkeyan-Builder --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
+                        "[--toolchain <dir>] [--icon-only]\n"
+                        "       Arkeyan-Builder --iso <disc image> --menu-music <file.wav> [--kit <kit dir>]\n");
     }
 }
 
@@ -1288,6 +1432,8 @@ int main(int argc, char** argv)
             options.toolchain = PathFromUtf8(argv[++i]);
         else if (arg == "--icon-only")
             options.iconOnly = true;
+        else if (arg == "--menu-music" && hasValue)
+            options.menuMusic = PathFromUtf8(argv[++i]);
         else if (arg == "--jobs" && hasValue)
             options.jobs = unsigned(std::max(1, atoi(argv[++i])));
         else
@@ -1296,7 +1442,7 @@ int main(int argc, char** argv)
             return 2;
         }
     }
-    if (options.iso.empty() || options.out.empty())
+    if (options.iso.empty() || (options.out.empty() && options.menuMusic.empty()))
     {
         Usage();
         return 2;
@@ -1308,7 +1454,8 @@ int main(int argc, char** argv)
         if (options.kit.empty())
             options.kit = ExecutableDirectory();
         options.iso = fs::absolute(options.iso);
-        options.out = fs::absolute(options.out);
+        if (!options.out.empty())
+            options.out = fs::absolute(options.out);
         options.kit = fs::absolute(options.kit);
         if (!options.toolchain.empty())
             options.toolchain = fs::absolute(options.toolchain);
@@ -1332,6 +1479,16 @@ int main(int argc, char** argv)
         if (!native && !build.cross)
             Fail("this kit is for " + build.platform);
 
+        if (!options.menuMusic.empty())
+        {
+            options.menuMusic = fs::absolute(options.menuMusic);
+            IdentifyGame(build);
+            MenuMusic(build);
+            EndStep();
+            Emit("done", Slashes(options.menuMusic));
+            return 0;
+        }
+
         // About 2 GB of memory per compiler on the largest files.
         if (options.jobs == 0)
         {
@@ -1340,19 +1497,19 @@ int main(int argc, char** argv)
             options.jobs = std::max(1u, std::min(threads, memory));
         }
 
-        build.work = options.out / "ssabuild-work";
+        build.work = WorkFolder(options.out);
         fs::create_directories(build.work / "logs");
         build.vars["KIT"] = Slashes(options.kit);
         build.vars["PPC"] = "ppc";
-        Log("SkyBuild " + build.kit["version"] + " (" + build.kit["build"] + ", " + build.platform + "), kit " +
+        Log("Arkeyan-Builder " + build.kit["version"] + " (" + build.kit["build"] + ", " + build.platform + "), kit " +
             Slashes(options.kit));
 
         std::error_code error;
         auto space = fs::space(options.out, error);
         if (!error && space.available < (6ull << 30))
-            Log("warning: only " + std::to_string(space.available >> 20) +
-                " MB free on the game drive; about 5 GB "
-                "are needed");
+            Emit("warn", "only " + std::to_string(space.available >> 20) +
+                             " MB free on the game drive; about 5 GB "
+                             "are needed");
 
         IdentifyGame(build);
         if (options.iconOnly)
@@ -1372,18 +1529,16 @@ int main(int argc, char** argv)
         Link(build);
         if (AddMovieShaders(build))
         {
-            // The game built above runs, without the movies: keep it if this second pass fails (a rerun retries it).
-            try
-            {
-                TranslateShaders(build);
-                Compile(build);
-                Link(build);
-            }
-            catch (const Failure& failure)
-            {
-                Log("warning: " + failure.message + "; the game is built but movies may not be drawn");
-            }
+            // A failure here is the install's: without these shaders a game can lose its movies, its interface or its whole
+            // picture. A rerun retries it (the shader step's stamp holds the run-time list).
+            TranslateShaders(build);
+            Compile(build);
+            Link(build);
         }
+        RequireRuntimeTranslations(build, build.work / "ppc" / "shader_cache.cpp");
+        fs::create_directories(build.work / "movies");
+        WriteText(build.work / "movies" / "done.txt",
+            std::to_string(RuntimeShaders(build.work / "shaders" / "input" / "runtime").size()) + "\n");
         EndStep();
         auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
         Log("finished in " + std::to_string(seconds.count()) + " s");

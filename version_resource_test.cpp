@@ -13,16 +13,21 @@ static void Expect(const std::string& text, const std::string& line)
     }
 }
 
-int main()
+int TestAccentedBuildPaths(int argc, char** argv);
+
+int main(int argc, char** argv)
 {
-    std::string rc = VersionResource("Skylanders: Giants", "SGRecomp", "0.8.2");
+    if (argc > 1)
+        return TestAccentedBuildPaths(argc, argv);
+    failures += TestAccentedBuildPaths(argc, argv);
+    std::string rc = VersionResource("Skylanders Giants", "Skylanders Giants", "0.8.2");
     Expect(rc, "FILEVERSION 0,8,2,0");
     Expect(rc, "PRODUCTVERSION 0,8,2,0");
-    Expect(rc, "            VALUE \"FileDescription\", \"Skylanders: Giants\"");
+    Expect(rc, "            VALUE \"FileDescription\", \"Skylanders Giants\"");
     Expect(rc, "            VALUE \"FileVersion\", \"0.8.2\"");
-    Expect(rc, "            VALUE \"OriginalFilename\", \"SGRecomp.exe\"");
-    Expect(VersionResource("Skylanders", "SSARecomp", "1.2.3.4"), "FILEVERSION 1,2,3,4");
-    Expect(VersionResource("Skylanders", "SSARecomp", "1.0"), "FILEVERSION 1,0,0,0");
+    Expect(rc, "            VALUE \"OriginalFilename\", \"Skylanders Giants.exe\"");
+    Expect(VersionResource("Skylanders", "Skylanders Spyro's Adventure", "1.2.3.4"), "FILEVERSION 1,2,3,4");
+    Expect(VersionResource("Skylanders", "Skylanders Spyro's Adventure", "1.0"), "FILEVERSION 1,0,0,0");
     if (failures == 0)
         printf("ok\n");
     return failures != 0;

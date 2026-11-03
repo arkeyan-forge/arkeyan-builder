@@ -1,21 +1,20 @@
-SSARecomp player kit (@PLATFORM@)
-=================================
+Skylanders player kit (@PLATFORM@)
+==================================
 
-This kit builds SSARecomp, a native port of Skylanders: Spyro's Adventure, SGRecomp, the one of Skylanders: Giants,
-and SSFRecomp, the one of Skylanders: Swap Force (all Xbox 360), on your own machine from your own disc image; SkyBuild recognises which game the disc is. It contains no game code and no game file: the game's code and shaders are translated from
+This kit builds Skylanders Spyro's Adventure, Skylanders Giants, Skylanders Swap Force and Skylanders Trap Team (all Xbox 360), on your own machine from your own disc image; Arkeyan-Builder recognises which game the disc is. It contains no game code and no game file: the game's code and shaders are translated from
 your disc here, and the result is for your own use only. Never share the built game or its work folder.
 
-Normally Arkeyan Launcher runs SkyBuild for you. By hand:
+Normally Arkeyan Launcher runs Arkeyan-Builder for you. By hand:
 
-    SkyBuild --iso <your disc .iso> --out <game folder> [--jobs N] [--toolchain <folder>]
+    Arkeyan-Builder --iso <your disc .iso> --out <game folder> [--jobs N] [--toolchain <folder>]
 
 It prints one event per line (@step, @progress, @log, @error, @done) and ends with "@done <path of the game>".
-A second run only redoes what changed. Work files stay in <game folder>/ssabuild-work (about 2-3 GB; delete it
+A second run only redoes what changed. Work files stay in <game folder>/arkeyan-work (existing ssabuild-work folders are reused in place; about 2-3 GB; delete it
 once the game runs if you need the space, the next build will then start over).
 
 Windows 10 (1903 or later) or 11, x64:
-- if SmartScreen warns about the launcher or SkyBuild: More info, then Run anyway;
-- internet for the first build: SkyBuild downloads the llvm-mingw 20260922 compiler (190 MB, from
+- if SmartScreen warns about the launcher or Arkeyan-Builder: More info, then Run anyway;
+- internet for the first build: Arkeyan-Builder downloads the llvm-mingw 20260922 compiler (190 MB, from
   github.com/mstorsjo/llvm-mingw, checked against its SHA-256) into %APPDATA%\Skylanders\toolchains
   (about 750 MB once extracted) with the curl.exe and tar.exe that Windows ships;
 - about 5 GB free next to the game folder, 8 GB of RAM or more;
@@ -23,11 +22,11 @@ Windows 10 (1903 or later) or 11, x64:
 - a GPU with a Vulkan 1.2 driver (any recent NVIDIA, AMD or Intel driver), else Direct3D 12.
 
 macOS (Apple silicon): Xcode with its Metal toolchain (xcodebuild -downloadComponent MetalToolchain on Xcode 26+).
-The launcher and SkyBuild are not notarized: on macOS 15 or later, the first time, try to open it, then
+The launcher and Arkeyan-Builder are not notarized: on macOS 15 or later, the first time, try to open it, then
 System Settings > Privacy & Security > Open Anyway.
 
 Linux, x86_64 (Ubuntu 22.04 or later, Fedora, Arch, SteamOS 3.5 or later on the Steam Deck; glibc 2.34 or later):
-- no root and no development package: SkyBuild downloads the zig 0.17.0 compiler (55 MB, from ziglang.org, checked
+- no root and no development package: Arkeyan-Builder downloads the zig 0.17.0 compiler (55 MB, from ziglang.org, checked
   against its SHA-256) into ~/.local/share/Skylanders/toolchains (about 410 MB once extracted, plus about 100 MB the first
   build adds there) with curl (or wget), tar and xz, which every desktop has; the shader compiler (dxc) needs
   libstdc++ (GCC 11 or later) and zlib, also on every desktop;
@@ -42,17 +41,18 @@ Linux, x86_64 (Ubuntu 22.04 or later, Fedora, Arch, SteamOS 3.5 or later on the 
   then unplug the portal and plug it in again. Without it the game's log says "Linux needs this udev rule".
 
 In this kit:
-- SkyBuild: the build driver; bin/XenonRecomp and bin/XenosRecomp: the code and shader translators (separate
+- Arkeyan-Builder: the build driver; bin/XenonRecomp and bin/XenosRecomp: the code and shader translators (separate
   programs); dxc (DirectX Shader Compiler) next to XenosRecomp (libdxcompiler.so on Linux);
 - lib/, include/, commands/: the prebuilt runtime (everything but the game code) and how to compile and link against it;
 - config/: XenonRecomp's settings for this game; res/: fonts and notices copied next to the game;
 - licenses/: LICENSE, THIRD_PARTY_NOTICES.md, and the source of the (L)GPL parts shipped as binaries: XenonRecomp
-  (its PowerPC disassembler is GPL-2.0-or-later) and FFmpeg 8.1.2 (LGPL-2.1-or-later, linked on your machine;
-  ffmpeg-build.sh is how the libraries in lib/ were configured).
+  (its PowerPC disassembler is GPL-2.0-or-later) and FFmpeg 8.1.2 (LGPL-2.1-or-later, also linked into Arkeyan-Builder
+  for disc menu music; ffmpeg-build.sh is how the libraries were configured);
+- relink/: Arkeyan-Builder objects, libraries and its link recipe for replacing FFmpeg; see relink/README.txt.
 
 ---
 FR : ce kit construit le jeu sur votre machine à partir de votre propre ISO. Il ne contient rien du jeu.
-Arkeyan Launcher lance SkyBuild tout seul ; à la main : SkyBuild --iso <ISO> --out <dossier du jeu>.
+Arkeyan Launcher lance Arkeyan-Builder tout seul ; à la main : Arkeyan-Builder --iso <ISO> --out <dossier du jeu>.
 Windows : il faut Internet au premier lancement (téléchargement du compilateur, 190 Mo), ~5 Go libres, et
 15 à 45 min pour la première construction. Linux : le compilateur zig (55 Mo) est téléchargé, sans sudo ;
 le portail demande une fois la règle udev ci-dessus. Ne partagez jamais le jeu construit.

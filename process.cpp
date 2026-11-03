@@ -18,6 +18,10 @@ extern char** environ;
 #endif
 
 #ifdef _WIN32
+static unsigned long g_startError = 0;
+
+unsigned long RunStartError() { return g_startError; }
+
 static std::wstring Widen(const std::string& text)
 {
     if (text.empty())
@@ -110,7 +114,11 @@ int Run(const std::vector<std::string>& args, const RunOptions& options)
     CloseHandle(output);
     CloseHandle(input);
     if (!started)
+    {
+        g_startError = GetLastError();
         return -1;
+    }
+    g_startError = 0;
     CloseHandle(process.hThread);
 
     int result = 0;
@@ -234,6 +242,8 @@ int Run(const std::vector<std::string>& args, const RunOptions& options)
         }
     }
 }
+
+unsigned long RunStartError() { return 0; }
 
 void SetEnv(const char* name, const std::string& value)
 {

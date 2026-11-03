@@ -3,11 +3,11 @@
     python3 -I kit_commands.py <game id> <runtime build dir> <stub ppc dir> <kit dir>
 
 Run once per game of the kit (docs/release/launcher/kit_contract.md). The commands are the ones CMake/Ninja would run, with the
-build machine's paths replaced by ${KIT}, ${CXX}, ${SDK}, ${PPC}, ${SRC}, ${OBJ}, ${OUT} and ${OBJECTS} (SkyBuild). They go to
-commands/<game>/. The SSARecomp target's own objects are compiled against the game's ppc_config.h, so they are the game's:
+build machine's paths replaced by ${KIT}, ${CXX}, ${SDK}, ${PPC}, ${SRC}, ${OBJ}, ${OUT} and ${OBJECTS} (Arkeyan-Builder). They go to
+commands/<game>/. The ArkeyanRuntime target's own objects are compiled against the game's ppc_config.h, so they are the game's:
 lib/<game>/runtime/. The static libraries (SDL, plume, FFmpeg, ...) are the same for every game: lib/ holds one copy, shared
 (a library that differs between games would go to lib/<game>/ and the game's link.args would name it there). The game code
-library and the shader cache library are left out (SkyBuild compiles them from the player's disc and passes them as
+library and the shader cache library are left out (Arkeyan-Builder compiles them from the player's disc and passes them as
 ${OBJECTS}).
 """
 import filecmp
@@ -95,10 +95,10 @@ gpu = os.path.join(root, "runtime/gpu")
 ppc_line = next(l for l in commands("SSARecompLib/libSSARecompLib.a") if "ppc_func_mapping.cpp" in l and " -c " in l)
 write_args("compile.args", compile_args(ppc_line, {
     stub: "${PPC}", simde: "${KIT}/include/simde", guard: "${KIT}/include/indirect_call_guard.h"}))
-cache_line = next(l for l in commands("SSARecomp/gpu/libSSAShaderCache.a") if "shader_cache.cpp" in l and " -c " in l)
+cache_line = next(l for l in commands("ArkeyanRuntime/gpu/libSSAShaderCache.a") if "shader_cache.cpp" in l and " -c " in l)
 write_args("shader_cache.args", compile_args(cache_line, {gpu: "${KIT}/include"}))
 
-link_line = commands("SSARecomp")[-1]
+link_line = commands("ArkeyanRuntime")[-1]
 args = common(compiler_part(link_line))
 os.makedirs(os.path.join(kit, "lib", game, "runtime"), exist_ok=True)
 result = []
@@ -117,7 +117,7 @@ while i < len(args):
     elif a.endswith("libSSAShaderCache.a"):
         pass  # shader_cache.o is one of ${OBJECTS}
     elif not a.startswith("-") and a.endswith((".obj", ".o", ".res")):
-        name = a.split("SSARecomp.dir/", 1)[-1].replace("/", "_")
+        name = a.split("ArkeyanRuntime.dir/", 1)[-1].replace("/", "_")
         shutil.copyfile(os.path.join(build, a), os.path.join(kit, "lib", game, "runtime", name))
         result.append("${KIT}/lib/" + game + "/runtime/" + name)
     elif not a.startswith("-") and a.endswith(".a"):

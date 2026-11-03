@@ -1,4 +1,4 @@
-// The VERSIONINFO of a game SkyBuild links on Windows, as windres source: the Details tab of the exe's properties.
+// The VERSIONINFO of a game Arkeyan-Builder links on Windows, as windres source: the Details tab of the exe's properties.
 #pragma once
 
 #include <algorithm>

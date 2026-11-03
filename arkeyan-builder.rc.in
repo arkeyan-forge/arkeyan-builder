@@ -12,10 +12,10 @@ FILETYPE 1
     {
         BLOCK "040904B0"
         {
-            VALUE "FileDescription", "SkyBuild"
+            VALUE "FileDescription", "Arkeyan-Builder"
             VALUE "FileVersion", "@SSA_KIT_VERSION@"
-            VALUE "InternalName", "SkyBuild"
-            VALUE "OriginalFilename", "SkyBuild.exe"
+            VALUE "InternalName", "Arkeyan-Builder"
+            VALUE "OriginalFilename", "Arkeyan-Builder.exe"
             VALUE "ProductName", "Skylanders kit"
             VALUE "ProductVersion", "@SSA_KIT_VERSION@"
         }

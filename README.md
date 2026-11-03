@@ -1,4 +1,4 @@
-# skybuild: the player kit's builder (SSABuild)
+# arkeyan-builder: the player kit's builder (SSABuild)
 
 > **Purpose:** what this repository is, how it fits the forge, and its licence · **Status:** current · **Tags:** none
 

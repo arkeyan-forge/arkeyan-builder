@@ -167,8 +167,8 @@ std::vector<std::string> ShaderArchivePaths(const std::string& recipe, const std
     return paths;
 }
 
-bool ExtractArchiveShaders(const std::vector<uint8_t>& archive, const std::filesystem::path& outDir,
-    ShaderExtraction& result, std::set<std::string>* sharedSeen)
+bool CollectArchiveShaders(
+    const std::vector<uint8_t>& archive, ShaderExtraction& result, std::vector<ArchiveShader>& shaders)
 {
     auto iga = art::alchemy::IgaArchive::Open(
         [&archive](uint64_t offset, size_t size, uint8_t* out) {
@@ -181,32 +181,64 @@ bool ExtractArchiveShaders(const std::vector<uint8_t>& archive, const std::files
     if (!iga)
         return false;
     result.entries = iga->Count();
-    std::set<std::string> localSeen;
-    auto& seen = sharedSeen ? *sharedSeen : localSeen;
-    std::filesystem::create_directories(outDir);
     for (size_t i = 0; i < iga->Count(); i++)
     {
-        if (iga->Size(i) < 0x40 || iga->Read(i, 4) != std::vector<uint8_t>{ 'I', 'G', 'Z', 1 })
+        if (iga->Size(i) < 0x40)
+            continue;
+        auto prefix = iga->Read(i, 4);
+        if (prefix.empty())
+        {
+            result.unsupported++; // cannot determine whether this entry contains shaders
+            continue;
+        }
+        if (prefix != std::vector<uint8_t>{ 'I', 'G', 'Z', 1 })
             continue;
         std::vector<uint8_t> data = iga->Read(i);
         if (data.size() < 0x40 || memcmp(data.data(), "IGZ\x01", 4) != 0)
-            continue;
+            return false;
         uint32_t version = Be32(&data[4]);
         if (version != 6 && version != 7 && version != 8)
+        {
+            result.unsupported++;
             continue;
+        }
         result.igz++;
-        auto write = [&](const std::string& blob, bool vertex) {
-            std::string name = Sha256Text(blob).substr(0, 16) + (vertex ? ".vs" : ".ps");
-            if (!seen.insert(name).second)
-                return;
-            (vertex ? result.vertex : result.pixel)++;
-            std::ofstream file(outDir / name, std::ios::binary | std::ios::trunc);
-            file.write(blob.data(), std::streamsize(blob.size()));
+        auto keep = [&](const std::string& blob, bool vertex) {
+            shaders.push_back({ Sha256Text(blob).substr(0, 16) + (vertex ? ".vs" : ".ps"), blob });
         };
         if (version == 6)
-            ForEachContainerV6(data, write);
+            ForEachContainerV6(data, keep);
         else
-            ForEachContainerV7(data, write); // v8 (Trap Team) has v7's section table and memory handles [V]
+            ForEachContainerV7(data, keep); // v8 (Trap Team) has v7's section table and memory handles [V]
     }
     return true;
+}
+
+bool WriteArchiveShaders(const std::vector<ArchiveShader>& shaders, const std::filesystem::path& outDir,
+    ShaderExtraction& result, std::set<std::string>& seen)
+{
+    std::filesystem::create_directories(outDir);
+    for (const ArchiveShader& shader : shaders)
+    {
+        if (seen.count(shader.name))
+            continue;
+        std::ofstream file(outDir / shader.name, std::ios::binary | std::ios::trunc);
+        file.write(shader.bytes.data(), std::streamsize(shader.bytes.size()));
+        file.close();
+        if (!file)
+            return false;
+        seen.insert(shader.name);
+        (shader.name.compare(shader.name.size() - 3, 3, ".vs") == 0 ? result.vertex : result.pixel)++;
+    }
+    return true;
+}
+
+bool ExtractArchiveShaders(const std::vector<uint8_t>& archive, const std::filesystem::path& outDir,
+    ShaderExtraction& result, std::set<std::string>* sharedSeen)
+{
+    std::vector<ArchiveShader> shaders;
+    if (!CollectArchiveShaders(archive, result, shaders))
+        return false;
+    std::set<std::string> localSeen;
+    return WriteArchiveShaders(shaders, outDir, result, sharedSeen ? *sharedSeen : localSeen);
 }

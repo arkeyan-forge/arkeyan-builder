@@ -1,0 +1,26 @@
+// The local CMake build's identity; player kits add these resources at the final Arkeyan-Builder link.
+#pragma code_page(65001)
+@SSA_ICON_RESOURCE@
+1 VERSIONINFO
+FILEVERSION @SSA_GAME_VERSION_PARTS@
+PRODUCTVERSION @SSA_GAME_VERSION_PARTS@
+FILEOS 0x40004
+FILETYPE 1
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "040904B0"
+        {
+            VALUE "FileDescription", "@SSA_RUNTIME_NAME@"
+            VALUE "ProductName", "@SSA_RUNTIME_NAME@"
+            VALUE "InternalName", "@SSA_RUNTIME_NAME@"
+            VALUE "OriginalFilename", "@SSA_RUNTIME_NAME@.exe"
+            VALUE "FileVersion", "@SSA_GAME_VERSION@"
+            VALUE "ProductVersion", "@SSA_GAME_VERSION@"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x409, 0x4B0
+    }
+}
