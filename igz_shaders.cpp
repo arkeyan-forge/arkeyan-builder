@@ -1,6 +1,6 @@
 // See igz_shaders.h. The formats are documented in games/giants/docs/shaders.md and games/swapforce/docs/shaders.md
-// (reverse-engineered from the discs); the archive reader (IGA v8, v10 and v11, the chunked LZMA) is the runtime's,
-// host/art/alchemy_archive.h.
+// (reverse-engineered from the discs); the archive reader (IGA v8, v10 and v11 in both byte orders, the chunked LZMA)
+// is the runtime's, host/art/alchemy_archive.h.
 #include "igz_shaders.h"
 #include "host/art/alchemy_archive.h"
 #include "sha256.h"
@@ -197,7 +197,7 @@ bool CollectArchiveShaders(
         if (data.size() < 0x40 || memcmp(data.data(), "IGZ\x01", 4) != 0)
             return false;
         uint32_t version = Be32(&data[4]);
-        if (version != 6 && version != 7 && version != 8)
+        if (version < 6 || version > 9)
         {
             result.unsupported++;
             continue;
@@ -209,7 +209,9 @@ bool CollectArchiveShaders(
         if (version == 6)
             ForEachContainerV6(data, keep);
         else
-            ForEachContainerV7(data, keep); // v8 (Trap Team) has v7's section table and memory handles [V]
+            ForEachContainerV7(data, keep); // v8 (Trap Team) and v9 (SuperChargers) have v7's section table and
+        // memory handles [V: v9, the 1207 containers of shaders_xenon.pak, all
+        // byte for byte in a run-time dump]
     }
     return true;
 }

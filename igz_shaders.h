@@ -1,6 +1,6 @@
 // Alchemy shaders straight from the disc, without Python or a run of the game: Giants (IGA v8, IGZ v6;
-// games/giants/docs/shaders.md), Swap Force (IGA v10, IGZ v7; games/swapforce/docs/shaders.md) and Trap Team (IGA v11,
-// IGZ v8).
+// games/giants/docs/shaders.md), Swap Force (IGA v10, IGZ v7; games/swapforce/docs/shaders.md), Trap Team (IGA v11,
+// IGZ v8) and SuperChargers (IGA v11 big-endian, IGZ v9).
 #pragma once
 
 #include <cstdint>
@@ -18,8 +18,8 @@ struct ShaderExtraction
     size_t unsupported = 0; // entries this reader cannot inspect (unreadable data or unknown IGZ versions)
 };
 
-// Opens an IGA v8, v10 or v11 archive (the bytes of a .arc / .bld / .pak), decodes each entry that is an IGZ v6, v7 or v8 file,
-// and writes every Xenos shader container it holds to <outDir>/<hash>.vs|.ps, exactly as the game hands it to D3DVertexShader_Init /
+// Opens an IGA v8, v10 or v11 archive (the bytes of a .arc / .bld / .pak), decodes each entry that is an IGZ v6 to v9
+// file, and writes every Xenos shader container it holds to <outDir>/<hash>.vs|.ps, exactly as the game hands it to D3DVertexShader_Init /
 // D3DPixelShader_Init (the virtual part followed by the physical part). Equal containers are written once.
 // False when `archive` is unreadable or an output write fails. Unsupported IGZ entries are counted for a warning.
 // "igz:<path>" selects exactly one archive; "igz:all" selects every .arc/.bld file (paths from DiscFileSystem::Files).

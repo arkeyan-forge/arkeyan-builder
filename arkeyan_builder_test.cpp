@@ -67,10 +67,12 @@ static std::vector<uint8_t> MakeIgz(unsigned version, std::vector<std::string>& 
     return bytes;
 }
 
-static std::vector<uint8_t> MakeIga(unsigned version, const std::vector<uint8_t>& igz)
+// v11 comes little-endian (Trap Team: entries { offset, ?, size, mode }) or big-endian (SuperChargers: v10's entries).
+static std::vector<uint8_t> MakeIga(unsigned version, const std::vector<uint8_t>& igz, bool bigEndian = false)
 {
     std::vector<uint8_t> bytes(0x100);
-    bool big = version == 10;
+    bool big = version == 10 || bigEndian;
+    bool offsetFirst = version == 8 || (version == 11 && !big);
     memcpy(bytes.data(),
         big ? "\x1a"
               "AGI"
@@ -79,11 +81,11 @@ static std::vector<uint8_t> MakeIga(unsigned version, const std::vector<uint8_t>
     Put32(bytes, 4, version, big);
     Put32(bytes, 0x0C, 1, big);
     size_t entry = (version == 8 ? 0x34 : 0x38) + 4;
-    if (version == 10)
+    if (!offsetFirst)
         entry += 4;
     Put32(bytes, entry, 0x100, big);
-    Put32(bytes, entry + (version == 11 ? 8 : 4), uint32_t(igz.size()), big);
-    Put32(bytes, entry + (version == 11 ? 12 : 8), 0xFFFFFFFF, big);
+    Put32(bytes, entry + (version == 11 && !big ? 8 : 4), uint32_t(igz.size()), big);
+    Put32(bytes, entry + (version == 11 && !big ? 12 : 8), 0xFFFFFFFF, big);
     bytes.insert(bytes.end(), igz.begin(), igz.end());
     return bytes;
 }
@@ -98,13 +100,13 @@ static void TestShaders(const fs::path& scratch)
     for (const std::string path : { "/permanent/global.bld", "/archives/shaders_xenon.pak" })
         CHECK(ShaderArchivePaths("igz:" + path, files) == std::vector<std::string>{ path });
 
-    for (unsigned version : { 6u, 7u, 8u })
+    for (unsigned version : { 6u, 7u, 8u, 9u })
     {
         fs::path out = scratch / std::to_string(version);
         fs::remove_all(out);
         std::vector<std::string> containers;
         auto igz = MakeIgz(version, containers);
-        auto archive = MakeIga(version == 6 ? 8 : version == 7 ? 10 : 11, igz);
+        auto archive = MakeIga(version == 6 ? 8 : version == 7 ? 10 : 11, igz, version == 9);
         ShaderExtraction result;
         std::set<std::string> seen;
         CHECK(ExtractArchiveShaders(archive, out, result, &seen));
@@ -207,7 +209,7 @@ static void TestGames(const fs::path& root)
 {
     using namespace skybuild;
     std::vector<Game> games;
-    for (const std::string id : { "ssa", "giants", "swapforce", "trapteam" })
+    for (const std::string id : { "ssa", "giants", "swapforce", "trapteam", "superchargers" })
     {
         auto values = ReadKeyValues(root / "games" / id / "game.txt");
         CHECK(values["id"] == id);
