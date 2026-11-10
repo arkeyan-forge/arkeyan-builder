@@ -18,8 +18,8 @@ icon/resource fallback and low free space. Warnings remain visible even when an 
 Missing required runtime translations are fatal. A recipe without a positive runtime target warns
 that completeness cannot be verified; an empty capture still fails.
 
-`SSASkyBuildTest` checks metadata, strict movie stamp parsing, Windows startup hints, synthetic archive
-extraction and failed output writes. `SSASkyBuildGuardTest` calls the real install steps with invented
+`ArkeyanBuilderTest` checks metadata, strict movie stamp parsing, Windows startup hints, synthetic archive
+extraction and failed output writes. `ArkeyanBuilderGuardTest` calls the real install steps with invented
 inputs and intercepts every child call. It checks inventory changes, partial containers, blocked and
 incomplete translation, cached translation validation, short capture retention, resume polling,
 environment restoration and delayed completion markers. It also calls the install entry point with

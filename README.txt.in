@@ -1,7 +1,7 @@
 Skylanders player kit (@PLATFORM@)
 ==================================
 
-This kit builds Skylanders Spyro's Adventure, Skylanders Giants, Skylanders Swap Force and Skylanders Trap Team (all Xbox 360), on your own machine from your own disc image; Arkeyan-Builder recognises which game the disc is. It contains no game code and no game file: the game's code and shaders are translated from
+This kit builds Skylanders Spyro's Adventure, Giants, Swap Force, Trap Team, SuperChargers and Imaginators (all Xbox 360), on your own machine from your own disc image; Arkeyan-Builder recognises which game the disc is. It contains no game code and no game file: the game's code and shaders are translated from
 your disc here, and the result is for your own use only. Never share the built game or its work folder.
 
 Normally Arkeyan Launcher runs Arkeyan-Builder for you. By hand:
@@ -16,7 +16,7 @@ Windows 10 (1903 or later) or 11, x64:
 - if SmartScreen warns about the launcher or Arkeyan-Builder: More info, then Run anyway;
 - internet for the first build: Arkeyan-Builder downloads the llvm-mingw 20260922 compiler (190 MB, from
   github.com/mstorsjo/llvm-mingw, checked against its SHA-256) into %APPDATA%\Skylanders\toolchains
-  (about 750 MB once extracted) with the curl.exe and tar.exe that Windows ships;
+  (about 750 MB once extracted); Arkeyan-Builder downloads and unpacks it itself, no other program is started for that;
 - about 5 GB free next to the game folder, 8 GB of RAM or more;
 - the first build takes 15-45 minutes depending on the CPU;
 - a GPU with a Vulkan 1.2 driver (any recent NVIDIA, AMD or Intel driver), else Direct3D 12.
@@ -32,13 +32,15 @@ Linux, x86_64 (Ubuntu 22.04 or later, Fedora, Arch, SteamOS 3.5 or later on the 
   libstdc++ (GCC 11 or later) and zlib, also on every desktop;
 - about 6 GB free next to the game folder, 8 GB of RAM or more; the first build takes 15-45 minutes;
 - to play: a Vulkan driver (Mesa or NVIDIA; libvulkan.so.1), X11 or Wayland and PipeWire, PulseAudio or ALSA;
-- the portal: /dev/hidraw* belongs to root, so the portal needs a udev rule once (it is the only step that needs
-  sudo; on the Steam Deck, set a password with passwd first). In a terminal:
+- the portal: /dev/hidraw* and /dev/bus/usb/* belong to root, so the portal needs udev rules once (it is the only
+  step that needs sudo; on the Steam Deck, set a password with passwd first). The first line is for the Wii, Wii U,
+  PlayStation and PC portals, the other two for the Xbox 360 and Xbox One portals (1430:1F17, 1430:09AA). In a terminal:
 
-    echo 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1430", ATTRS{idProduct}=="0150", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-skylanders-portal.rules
+    printf '%s\n' 'SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1430", ATTRS{idProduct}=="0150", MODE="0660", TAG+="uaccess"' 'SUBSYSTEM=="usb", ATTRS{idVendor}=="1430", MODE="0660", TAG+="uaccess"' 'SUBSYSTEM=="usb", ATTRS{idVendor}=="24c6", ATTRS{idProduct}=="fa00", MODE="0660", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/70-skylanders-portal.rules
     sudo udevadm control --reload-rules && sudo udevadm trigger
 
-  then unplug the portal and plug it in again. Without it the game's log says "Linux needs this udev rule".
+  then unplug the portal and plug it in again. Without them the game's log says "Linux needs this udev rule". An Xbox
+  portal also needs libusb-1.0 (the libusb-1.0-0 package; most desktops have it).
 
 In this kit:
 - Arkeyan-Builder: the build driver; bin/XenonRecomp and bin/XenosRecomp: the code and shader translators (separate

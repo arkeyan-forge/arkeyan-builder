@@ -17,14 +17,19 @@
 #include "host/xex_title.h"
 #include "game_icon.h"
 #include "game_config.h"
+#include "edition.h"
 #include "install_guard.h"
 #include "host/art/game_art.h"
+#include "hd_textures.h"
+#include "host/art/lux_images.h"
+#include "host/texture_pack.h"
 #include "igz_shaders.h"
 #include "menu_music.h"
 #include "apu/xma_decoder.h"
 #include "process.h"
 #include "shader_cache_literals.h"
 #include "sha256.h"
+#include "toolchain_fetch.h"
 #include "version_resource.h"
 #include "vfs.h"
 #include <image.h>
@@ -193,6 +198,8 @@ namespace
         bool iconOnly = false; // --icon-only: make the game's icon (GameIcon) and stop; a check, no build
         fs::path
             menuMusic; // --menu-music <file.wav>: write the game's main menu theme there (MenuMusic) and stop; no build
+        std::string hdTextures; // --hd-textures <off|2x|auto>: the HD texture step (HdTextures); alone without --out
+        bool editionReport = false; // --edition-report <disc>: print what the disc is (EditionReportCommand) and stop
     };
 
     struct Build
@@ -260,13 +267,15 @@ namespace
     }
 
     // Arguments after the program go through a response file: no command line length limit, and paths with spaces or
-    // accents are passed as they are (clang reads it as UTF-8, GNU quoting). zig's driver subcommand (zig c++, Linux)
-    // stays on the command line.
+    // accents are passed as they are (clang reads it as UTF-8, GNU quoting). zig's driver (zig c++, Linux) gets them
+    // all on the command line instead: its own response-file reader opens a quote at any apostrophe and never closes
+    // it ("Spyro's", a home folder "O'Brien"), and Linux's command line has room for the whole link.
     std::vector<std::string> WithResponseFile(const std::vector<std::string>& args, const fs::path& rsp)
     {
-        size_t first = args.size() > 1 && (args[1] == "c++" || args[1] == "cc") ? 2 : 1;
+        if (args.size() > 1 && (args[1] == "c++" || args[1] == "cc"))
+            return args;
         std::string text;
-        for (size_t i = first; i < args.size(); i++)
+        for (size_t i = 1; i < args.size(); i++)
         {
             std::string quoted = "\"";
             for (char c : args[i])
@@ -279,9 +288,7 @@ namespace
         }
         if (ReadText(rsp) != text)
             WriteText(rsp, text);
-        std::vector<std::string> command(args.begin(), args.begin() + std::ptrdiff_t(first));
-        command.push_back("@" + Slashes(rsp));
-        return command;
+        return { args[0], "@" + Slashes(rsp) };
     }
 
     // --- toolchain -------------------------------------------------------------------------------------------------
@@ -304,6 +311,21 @@ namespace
             fs::path part = archive;
             part += ".part";
             fs::remove(part);
+#ifdef _WIN32
+            // In-process (WinHTTP): no curl.exe is started, and no program that antivirus heuristics distrust.
+            std::string failure;
+            uint64_t shown = ~0ull;
+            bool downloaded = HttpDownload(
+                url, part,
+                [&](uint64_t bytes) {
+                    if (bytes >> 20 != shown)
+                        Progress(shown = bytes >> 20, Compiler.size >> 20);
+                },
+                failure);
+            if (!downloaded)
+                Fail(std::string("could not download the compiler (") + Compiler.name +
+                     "): check the internet connection (" + failure + ")");
+#else
             RunOptions run;
             run.cwd = cache;
             run.log = build.work / "logs" / "download.log";
@@ -313,24 +335,18 @@ namespace
                 Progress(size >> 20, Compiler.size >> 20);
                 return false;
             };
-#ifdef _WIN32
-            fs::path curl = PathFromUtf8(GetEnv("SystemRoot")) / "System32" / "curl.exe";
-            int result = Run({ fs::exists(curl) ? Slashes(curl) : "curl.exe", "-fL", "--retry", "3", "--retry-delay",
-                                 "5", "-o", Slashes(part.filename()), url },
-                run);
-#else
             // curl, else wget (a desktop has one of them; neither needs root).
             int result =
                 Run({ "curl", "-fL", "--retry", "3", "--retry-delay", "5", "-o", part.filename().string(), url }, run);
             if (result == -1 || result == 127)
                 result = Run({ "wget", "-q", "--tries=3", "-O", part.filename().string(), url }, run);
-#endif
             if (result != 0)
             {
                 LogTail(run.log, 10);
                 Fail(std::string("could not download the compiler (") + Compiler.name +
                      "): check the internet connection" + (result == -1 ? " (no curl or wget found)" : ""));
             }
+#endif
             fs::rename(part, archive);
         }
         Log("checking " + Slashes(archive.filename()));
@@ -345,20 +361,23 @@ namespace
         fs::remove_all(staging);
         fs::remove_all(root);
         fs::create_directories(staging);
+#ifdef _WIN32
+        std::string failure;
+        if (!ExtractZip(
+                archive, staging, [](uint64_t, uint64_t) {}, failure) ||
+            !hasCompiler(staging / Compiler.folder))
+            Fail("could not extract " + Slashes(archive) + (failure.empty() ? "" : " (" + failure + ")"));
+#else
         RunOptions run;
         run.cwd = staging;
         run.log = build.work / "logs" / "extract.log";
-#ifdef _WIN32
-        fs::path tar = PathFromUtf8(GetEnv("SystemRoot")) / "System32" / "tar.exe";
-        int result = Run({ fs::exists(tar) ? Slashes(tar) : "tar.exe", "-xf", Slashes(archive) }, run);
-#else
         int result = Run({ "tar", "-xJf", archive.string() }, run);
-#endif
         if (result != 0 || !hasCompiler(staging / Compiler.folder))
         {
             LogTail(run.log, 10);
             Fail("could not extract " + Slashes(archive));
         }
+#endif
         fs::rename(staging / Compiler.folder, root);
         fs::remove_all(staging);
         WriteText(ready, std::string(Compiler.sha256) + "\n");
@@ -461,18 +480,26 @@ namespace
                "\nsize=" + std::to_string(size) + "\ntime=" + std::to_string(static_cast<long long>(time)) + "\n";
     }
 
-    // The kit's games and which one the disc is: default.xex's SHA-256 against every config/<id>/game.txt. An unknown
-    // disc stops here, before anything is downloaded or built.
-    void IdentifyGame(Build& build)
+    // The kit's games: every config/<id>/game.txt of kit.txt's games=.
+    std::vector<Game> KitGames(const Build& build)
     {
         std::vector<Game> games;
-        for (const std::string& id : SplitList(build.kit["games"]))
+        for (const std::string& id : SplitList(build.kit.count("games") ? build.kit.at("games") : ""))
         {
             auto values = ReadKeyValues(build.options.kit / "config" / id / "game.txt");
             if (values.empty())
                 Fail("the kit lists the game " + id + " but has no config/" + id + "/game.txt");
             games.push_back(ReadGame(id, std::move(values)));
         }
+        return games;
+    }
+
+    // Which of the kit's games the disc is: default.xex's SHA-256 against every config/<id>/game.txt, else its loaded
+    // image against the supported releases' (another edition of the same code: docs/tools/edition_finder.md). An unknown
+    // disc stops here, before anything is downloaded or built.
+    void IdentifyGame(Build& build)
+    {
+        std::vector<Game> games = KitGames(build);
         if (games.empty())
             Fail("this kit lists no game (kit.txt has no games=)");
 
@@ -489,11 +516,54 @@ namespace
             Log("game: " + game->name + " (default.xex " + sha.substr(0, 12) + "...)");
             return;
         }
+        auto execution = ReadExecutionInfo(xex);
+        Image image = XexImageReadable(xex) ? Image::ParseImage(xex.data(), xex.size()) : Image{};
+        size_t release = 0;
+        if (execution && image.data != nullptr)
+        {
+            std::string imageSha = Sha256Bytes(image.data.get(), image.size);
+            if (const Game* game = FindGameByImage(games, execution->titleId, imageSha, &release))
+            {
+                build.game = *game;
+                Log("game: " + game->name + ", " + RegionLabel(ReadRegion(xex)) + " edition (default.xex " +
+                    sha.substr(0, 12) + "...), the same game code as " +
+                    (release < game->releases.size() ? game->releases[release] : std::string("a supported release")));
+                return;
+            }
+        }
         std::string supported;
         for (const Game& game : games)
             supported += (supported.empty() ? "" : ", ") + game.name;
         Fail("this disc is not one of the games these tools build (" + supported +
              "): update the game tools (default.xex SHA-256 " + sha + ")");
+    }
+
+    // --edition-report: what the disc is, for a "New disc edition" issue (edition.h). Works without a kit.
+    int EditionReportCommand(Build& build)
+    {
+        DiscFileSystem disc;
+        if (!disc.Open(Slashes(build.options.iso).c_str()))
+            Fail("not an Xbox 360 disc image, or the file is incomplete");
+        std::string error;
+        const std::vector<Game> games = KitGames(build);
+        fingerprint::Code code;
+        auto edition = ReadDiscEdition(disc, games, error, &code);
+        if (!edition)
+            Fail(error);
+        std::string tools = "Arkeyan-Builder " + (build.kit.count("version") ? build.kit["version"] : std::string("?"));
+        // Other game code: where its functions are, by the fingerprints the kit has of the supported release's.
+        std::optional<std::vector<fingerprint::Found>> found;
+        const EditionMatch match = MatchEdition(*edition, games);
+        if (match.game != nullptr && match.sameXex < 0 && match.sameImage < 0 && !code.words.empty())
+        {
+            auto prints =
+                fingerprint::Read(ReadText(build.options.kit / "config" / match.game->id / "fingerprints.txt"));
+            if (!prints.empty())
+                found = fingerprint::Find(code, prints);
+        }
+        fputs(EditionReport(*edition, games, tools, found ? &*found : nullptr).c_str(), stdout);
+        fflush(stdout);
+        return 0;
     }
 
     void ReadDisc(Build& build)
@@ -1406,11 +1476,178 @@ namespace
             Fail("menu music: cannot write " + Slashes(build.options.menuMusic));
     }
 
+    // [Lux] the HD step's other sources: "strm" streams (levels, UI) and bare APKF packages (textures/*.apk).
+    bool IsLuxStream(const std::string& path)
+    {
+        std::string extension = fs::path(path).extension().string();
+        return extension == ".str" || extension == ".apk";
+    }
+
+    // --hd-textures: the game's textures doubled by our classical pass (hd_textures.h, docs/tools/hd_textures.md) into
+    // the player's pack folder <game data>/textures-hd/, from the disc's Alchemy archives and from <game
+    // data>/textures-dump/ when the player has dumped textures (any game). The player's own textures/ win over it.
+    void HdTextures(const Build& build)
+    {
+        Step("hdtextures", "Making HD textures");
+        hdtex::Mode mode;
+        if (!hdtex::ParseMode(build.options.hdTextures, mode))
+            Fail("--hd-textures takes off, 2x or auto");
+        fs::path game = datadir::Game(build.game.id);
+        if (game.empty())
+            Fail("HD textures: no data folder");
+        fs::path folder = game / "textures-hd", dump = game / "textures-dump";
+        if (mode == hdtex::Mode::Off)
+        {
+            fs::remove_all(folder);
+            Log("HD textures: off");
+            return;
+        }
+        uint32_t maxSide = hdtex::MaxSide(mode, PhysicalMemoryBytes());
+        std::vector<fs::path> dumped;
+        std::error_code error;
+        if (fs::is_directory(dump, error))
+            for (const auto& entry : fs::directory_iterator(dump, error))
+                if (entry.path().extension() == ".dds")
+                    dumped.push_back(entry.path());
+        std::sort(dumped.begin(), dumped.end());
+        // Recipe 1: hd_upscale.cpp's pass as first written. A new recipe (or mode, disc, dump) redoes the pack.
+        std::string stamp = DiscStamp(build) + "recipe=1\nmode=" + hdtex::ModeName(mode) +
+                            "\nmax=" + std::to_string(maxSide) + "\ndumped=" + std::to_string(dumped.size()) + "\n";
+        if (ReadText(folder / "hd.txt") == stamp)
+        {
+            Log("HD textures: up to date");
+            return;
+        }
+        fs::remove_all(folder);
+        fs::create_directories(folder);
+
+        std::vector<std::string> archives;
+        {
+            DiscFileSystem fileSystem;
+            if (!fileSystem.Open(Slashes(build.options.iso).c_str()))
+                Fail("not an Xbox 360 disc image: " + Slashes(build.options.iso));
+            for (const auto& [path, entry] : fileSystem.Files())
+            {
+                std::string extension = fs::path(path).extension().string();
+                if (extension == ".arc" || extension == ".bld" || extension == ".pak" || extension == ".str" ||
+                    extension == ".apk")
+                    archives.push_back(path);
+            }
+        }
+
+        // One job per archive (then per dump file), each with its own reader of the disc; a texture already taken
+        // (the same content in several archives) is done once.
+        std::mutex mutex;
+        std::set<uint64_t> seen;
+        std::map<std::string, size_t> kinds;
+        std::vector<std::string> manifest; // one line per distinct texture: what it is and what was done
+        size_t written = 0, tooLarge = 0, pictures = 0;
+        uint64_t sourceBytes = 0, packBytes = 0;
+        std::atomic<size_t> next{ 0 }, done{ 0 };
+        size_t total = archives.size() + dumped.size();
+        auto take = [&](const hdtex::Source& source) {
+            {
+                std::lock_guard lock(mutex);
+                pictures++;
+                if (!seen.insert(source.hash).second)
+                    return;
+            }
+            hdtex::Outcome outcome = hdtex::Process(source, maxSide, folder);
+            std::lock_guard lock(mutex);
+            std::string kind = hdtex::KindName(outcome.analysis.kind);
+            static constexpr const char* AlphaNames[] = { "opaque", "cutout", "blend" };
+            static constexpr const char* FormatNames[] = { "dxt1", "dxt3", "dxt5", "rgba8", "l8" };
+            manifest.push_back(texpack::HashName(source.hash) + " " + kind + " " +
+                               AlphaNames[int(outcome.analysis.alpha)] + " " + FormatNames[int(source.format)] + " " +
+                               std::to_string(source.width) + "x" + std::to_string(source.height) + " " +
+                               (outcome.written       ? "doubled"
+                                   : outcome.tooLarge ? "large"
+                                                      : "kept") +
+                               " " + source.name);
+            kinds[outcome.written ? kind + " doubled" : outcome.tooLarge ? kind + " too large" : kind]++;
+            written += outcome.written;
+            tooLarge += outcome.tooLarge;
+            if (outcome.written)
+            {
+                sourceBytes += outcome.sourceBytes;
+                packBytes += outcome.packBytes;
+            }
+        };
+        auto work = [&] {
+            DiscFileSystem fileSystem;
+            bool open = fileSystem.Open(Slashes(build.options.iso).c_str());
+            for (size_t i; (i = next++) < total;)
+            {
+                if (i >= archives.size())
+                {
+                    hdtex::Source source;
+                    if (hdtex::ReadDumpFile(dumped[i - archives.size()], source))
+                        take(source);
+                }
+                else if (const DiscFileSystem::Entry* entry = open ? fileSystem.Find(archives[i]) : nullptr;
+                    entry != nullptr && IsLuxStream(archives[i]))
+                {
+                    // [Lux] a "strm" stream (levels, UI) or a bare APKF package (textures/*.apk)
+                    std::vector<uint8_t> bytes(entry->size), stream;
+                    std::vector<hdtex::Source> sources;
+                    if (fileSystem.Read(*entry, 0, bytes.data(), uint32_t(bytes.size())) == bytes.size())
+                        hdtex::LuxPicturesOf(art::lux::UnpackStream(bytes, stream) ? stream : bytes, sources);
+                    for (const hdtex::Source& source : sources)
+                        take(source);
+                }
+                else if (entry != nullptr)
+                {
+                    auto reader = [&](uint64_t offset, size_t size, uint8_t* out) {
+                        return fileSystem.Read(*entry, offset, out, uint32_t(size)) == size;
+                    };
+                    if (auto archive = art::alchemy::IgaArchive::Open(reader, entry->size))
+                        for (size_t k = 0; k < archive->Count(); k++)
+                            if (auto file = art::alchemy::IgzFile::Parse(archive->Read(k)))
+                            {
+                                std::vector<hdtex::Source> sources;
+                                hdtex::PicturesOf(*file, sources);
+                                for (const hdtex::Source& source : sources)
+                                    take(source);
+                            }
+                }
+                size_t finished = ++done;
+                if (finished % 8 == 0 || finished == total)
+                    Progress(finished, total);
+            }
+        };
+        unsigned jobs = std::max(1u, build.options.jobs ? build.options.jobs : std::thread::hardware_concurrency());
+        std::vector<std::thread> threads;
+        for (unsigned j = 0; j < jobs; j++)
+            threads.emplace_back(work);
+        for (auto& thread : threads)
+            thread.join();
+
+        std::string summary;
+        for (const auto& [kind, count] : kinds)
+            summary += (summary.empty() ? "" : ", ") + std::to_string(count) + " " + kind;
+        Log("HD textures (" + std::string(hdtex::ModeName(mode)) + ", up to " + std::to_string(maxSide) +
+            " texels a side): " + std::to_string(archives.size()) + " archives and " + std::to_string(dumped.size()) +
+            " dumped files, " + std::to_string(pictures) + " pictures, " + std::to_string(seen.size()) +
+            " distinct: " + summary);
+        Log("HD textures: " + std::to_string(written) + " written, " + std::to_string(packBytes >> 20) +
+            " MB of video memory in place of " + std::to_string(sourceBytes >> 20) + " MB (" +
+            std::to_string(tooLarge) + " left as they are, over the side)");
+        std::sort(manifest.begin(), manifest.end());
+        std::string list = "# hash kind alpha format size result source\n";
+        for (const std::string& line : manifest)
+            list += line + "\n";
+        WriteText(folder / "manifest.txt", list);
+        WriteText(folder / "hd.txt", stamp);
+    }
+
     void Usage()
     {
-        fprintf(stderr, "usage: Arkeyan-Builder --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
-                        "[--toolchain <dir>] [--icon-only]\n"
-                        "       Arkeyan-Builder --iso <disc image> --menu-music <file.wav> [--kit <kit dir>]\n");
+        fprintf(stderr,
+            "usage: Arkeyan-Builder --iso <disc image> --out <game dir> [--kit <kit dir>] [--jobs N] "
+            "[--toolchain <dir>] [--icon-only] [--hd-textures off|2x|auto]\n"
+            "       Arkeyan-Builder --iso <disc image> --menu-music <file.wav> [--kit <kit dir>]\n"
+            "       Arkeyan-Builder --iso <disc image> --hd-textures off|2x|auto [--kit <kit dir>] [--jobs N]\n"
+            "       Arkeyan-Builder --edition-report <disc image> [--kit <kit dir>]\n");
     }
 }
 
@@ -1422,8 +1659,11 @@ int main(int argc, char** argv)
     {
         std::string arg = argv[i];
         bool hasValue = i + 1 < argc;
-        if (arg == "--iso" && hasValue)
+        if ((arg == "--iso" || arg == "--edition-report") && hasValue)
+        {
+            options.editionReport = options.editionReport || arg == "--edition-report";
             options.iso = PathFromUtf8(argv[++i]);
+        }
         else if (arg == "--out" && hasValue)
             options.out = PathFromUtf8(argv[++i]);
         else if (arg == "--kit" && hasValue)
@@ -1436,13 +1676,18 @@ int main(int argc, char** argv)
             options.menuMusic = PathFromUtf8(argv[++i]);
         else if (arg == "--jobs" && hasValue)
             options.jobs = unsigned(std::max(1, atoi(argv[++i])));
+        else if (arg == "--hd-textures" && hasValue)
+            options.hdTextures = argv[++i];
         else
         {
             Usage();
             return 2;
         }
     }
-    if (options.iso.empty() || (options.out.empty() && options.menuMusic.empty()))
+    hdtex::Mode hdMode;
+    if (options.iso.empty() ||
+        (options.out.empty() && options.menuMusic.empty() && options.hdTextures.empty() && !options.editionReport) ||
+        (!options.hdTextures.empty() && !hdtex::ParseMode(options.hdTextures, hdMode)))
     {
         Usage();
         return 2;
@@ -1462,6 +1707,8 @@ int main(int argc, char** argv)
         if (!fs::is_regular_file(options.iso) && !fs::is_regular_file(options.iso / "gamedata.manifest"))
             Fail("no disc image at " + Slashes(options.iso));
         build.kit = ReadKeyValues(options.kit / "kit.txt");
+        if (options.editionReport)
+            return EditionReportCommand(build);
         if (build.kit.empty())
             Fail("no kit at " + Slashes(options.kit) + " (kit.txt is missing)");
         build.platform = build.kit["platform"];
@@ -1486,6 +1733,14 @@ int main(int argc, char** argv)
             MenuMusic(build);
             EndStep();
             Emit("done", Slashes(options.menuMusic));
+            return 0;
+        }
+        if (options.out.empty()) // --hd-textures alone
+        {
+            IdentifyGame(build);
+            HdTextures(build);
+            EndStep();
+            Emit("done", Slashes(datadir::Game(build.game.id) / "textures-hd"));
             return 0;
         }
 
@@ -1539,6 +1794,8 @@ int main(int argc, char** argv)
         fs::create_directories(build.work / "movies");
         WriteText(build.work / "movies" / "done.txt",
             std::to_string(RuntimeShaders(build.work / "shaders" / "input" / "runtime").size()) + "\n");
+        if (!options.hdTextures.empty())
+            HdTextures(build);
         EndStep();
         auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started);
         Log("finished in " + std::to_string(seconds.count()) + " s");

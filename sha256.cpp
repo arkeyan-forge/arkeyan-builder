@@ -126,3 +126,10 @@ std::string Sha256Text(const std::string& text)
     sha.Update(reinterpret_cast<const uint8_t*>(text.data()), text.size());
     return sha.Finish();
 }
+
+std::string Sha256Bytes(const void* data, size_t size)
+{
+    Sha256 sha;
+    sha.Update(static_cast<const uint8_t*>(data), size);
+    return sha.Finish();
+}

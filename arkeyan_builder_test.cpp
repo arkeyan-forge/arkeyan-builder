@@ -209,7 +209,7 @@ static void TestGames(const fs::path& root)
 {
     using namespace skybuild;
     std::vector<Game> games;
-    for (const std::string id : { "ssa", "giants", "swapforce", "trapteam", "superchargers" })
+    for (const std::string id : { "ssa", "giants", "swapforce", "trapteam", "superchargers", "imaginators" })
     {
         auto values = ReadKeyValues(root / "games" / id / "game.txt");
         CHECK(values["id"] == id);
@@ -218,7 +218,12 @@ static void TestGames(const fs::path& root)
         CHECK(fs::exists(root / "games" / id / "config" / games.back().toml));
         std::ifstream file(root / "games" / id / "info.cpp");
         std::string info{ std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>() };
-        CHECK(info.find("\"" + games.back().runtime + "\" };") != std::string::npos);
+        // The runtime's name is GameInfo's fourth field, the last but its colour (glow).
+        size_t runtime = info.rfind("\"" + games.back().runtime + "\",");
+        size_t glow = runtime == std::string::npos
+                          ? runtime
+                          : info.find_first_not_of(" \n", runtime + games.back().runtime.size() + 3);
+        CHECK(glow != std::string::npos && info.compare(glow, 2, "0x") == 0);
         for (const auto& hash : games.back().xexSha256)
             CHECK(hash.size() == 64 && info.find(hash) != std::string::npos);
     }

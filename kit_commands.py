@@ -89,13 +89,13 @@ def compile_args(line, includes):
 
 
 simde = os.path.join(root, "thirdparty/XenonRecomp/thirdparty/simde")
-guard = os.path.join(root, "SSARecompLib/indirect_call_guard.h")
+guard = os.path.join(root, "ArkeyanRecompLib/indirect_call_guard.h")
 gpu = os.path.join(root, "runtime/gpu")
 
-ppc_line = next(l for l in commands("SSARecompLib/libSSARecompLib.a") if "ppc_func_mapping.cpp" in l and " -c " in l)
+ppc_line = next(l for l in commands("ArkeyanRecompLib/libArkeyanRecompLib.a") if "ppc_func_mapping.cpp" in l and " -c " in l)
 write_args("compile.args", compile_args(ppc_line, {
     stub: "${PPC}", simde: "${KIT}/include/simde", guard: "${KIT}/include/indirect_call_guard.h"}))
-cache_line = next(l for l in commands("ArkeyanRuntime/gpu/libSSAShaderCache.a") if "shader_cache.cpp" in l and " -c " in l)
+cache_line = next(l for l in commands("ArkeyanRuntime/gpu/libArkeyanShaderCache.a") if "shader_cache.cpp" in l and " -c " in l)
 write_args("shader_cache.args", compile_args(cache_line, {gpu: "${KIT}/include"}))
 
 link_line = commands("ArkeyanRuntime")[-1]
@@ -112,9 +112,9 @@ while i < len(args):
         i += 1
     elif a.startswith("-Wl,--out-implib"):
         pass
-    elif a.endswith("libSSARecompLib.a"):
+    elif a.endswith("libArkeyanRecompLib.a"):
         result.append("${OBJECTS}")
-    elif a.endswith("libSSAShaderCache.a"):
+    elif a.endswith("libArkeyanShaderCache.a"):
         pass  # shader_cache.o is one of ${OBJECTS}
     elif not a.startswith("-") and a.endswith((".obj", ".o", ".res")):
         name = a.split("ArkeyanRuntime.dir/", 1)[-1].replace("/", "_")

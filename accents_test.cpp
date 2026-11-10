@@ -42,9 +42,9 @@ int TestAccentedBuildPaths(int argc, char** argv)
         fs::path folder = scratch / fs::path(name);
         fs::create_directories(folder);
 #ifdef _WIN32
-        fs::path self = ExecutableDirectory() / "SSAVersionResourceTest.exe";
+        fs::path self = ExecutableDirectory() / "ArkeyanVersionResourceTest.exe";
 #else
-        fs::path self = ExecutableDirectory() / "SSAVersionResourceTest";
+        fs::path self = ExecutableDirectory() / "ArkeyanVersionResourceTest";
 #endif
         fs::path child = folder / self.filename();
         fs::copy_file(self, child, fs::copy_options::overwrite_existing);
@@ -74,6 +74,8 @@ int TestAccentedBuildPaths(int argc, char** argv)
         check(ReadText(response) == "\"-I" + Slashes(folder) + "\"\n\"" + filename + "\"\n\"a\\\"b\"\n\"c\\\\d\"\n",
             "response file preserves UTF-8 and quoting");
         check(fs::remove(response), "delete response file");
+        const std::vector<std::string> zig{ "zig", "c++", "-o", "/o'brien/Skylanders Spyro's Adventure", "-L/k'it" };
+        check(WithResponseFile(zig, response) == zig && !fs::exists(response), "zig keeps apostrophes on argv");
         std::string compiler = GetEnv("SKY_ACCENTS_COMPILER");
         if (compiler.empty())
             compiler = SKY_ACCENTS_COMPILER;

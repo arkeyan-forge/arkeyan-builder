@@ -70,6 +70,12 @@ namespace skybuild
         std::string shaders; // where the shaders come from: "lsa" (shaders.lsa, effects.lsa and the XEX image)
         // or "igz:<archive path>" (Giants, Swap Force), "igz:all" (Trap Team: IGA v11 / IGZ v8)
         std::vector<std::string> xexSha256; // the accepted default.xex files
+        // Each of those releases' loaded image (the decrypted, decompressed basefile; same order, an empty item: not
+        // known) and its label ("USA, Australia"). Another edition whose loaded image is one of these runs the same code:
+        // only its XEX header differs (docs/tools/edition_finder.md).
+        std::vector<std::string> imageSha256;
+        std::vector<std::string> releases;
+        uint32_t titleId = 0;
         // The movie pass (AddMovieShaders); empty: no portal, no presses, and with no count it ends 8 s after the first new
         // shader.
         std::string moviePortal; // SKY_PORTAL for the run ("emulated": an empty emulated portal)
@@ -155,9 +161,22 @@ namespace skybuild
 
     inline Game ReadGame(const std::string& id, std::map<std::string, std::string> values)
     {
-        return { id, values["name"], values["runtime"], values["toml"], values["shaders"],
-            SplitList(values["xex_sha256"]), values["movie_portal"], values["movie_press"],
-            unsigned(strtoul(values["movie_shaders"].c_str(), nullptr, 10)) };
+        Game game;
+        game.id = id;
+        game.name = values["name"];
+        game.runtime = values["runtime"];
+        game.toml = values["toml"];
+        game.shaders = values["shaders"];
+        game.xexSha256 = SplitList(values["xex_sha256"]);
+        game.imageSha256 = SplitList(values["image_sha256"]);
+        std::stringstream labels(values["releases"]);
+        for (std::string label; std::getline(labels, label, ';');)
+            game.releases.push_back(label);
+        game.titleId = uint32_t(strtoul(values["title_id"].c_str(), nullptr, 16));
+        game.moviePortal = values["movie_portal"];
+        game.moviePress = values["movie_press"];
+        game.movieShaders = unsigned(strtoul(values["movie_shaders"].c_str(), nullptr, 10));
+        return game;
     }
 
     inline const Game* FindGame(const std::vector<Game>& games, const std::string& sha)
@@ -165,6 +184,22 @@ namespace skybuild
         for (const Game& game : games)
             if (std::find(game.xexSha256.begin(), game.xexSha256.end(), sha) != game.xexSha256.end())
                 return &game;
+        return nullptr;
+    }
+
+    // The game a disc of another edition belongs to: its title ID and a supported release's loaded image. `release`
+    // receives that release's index.
+    inline const Game* FindGameByImage(
+        const std::vector<Game>& games, uint32_t titleId, const std::string& imageSha, size_t* release = nullptr)
+    {
+        for (const Game& game : games)
+            for (size_t i = 0; i < game.imageSha256.size(); i++)
+                if (game.titleId == titleId && !imageSha.empty() && game.imageSha256[i] == imageSha)
+                {
+                    if (release != nullptr)
+                        *release = i;
+                    return &game;
+                }
         return nullptr;
     }
 }
