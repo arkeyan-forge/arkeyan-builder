@@ -1226,8 +1226,8 @@ namespace
             !fs::exists(object))
         {
             LogTail(run.log);
-            Emit("warn", "icon: could not embed the game's resources, the executable gets no icon and no version");
-            return "";
+            fs::remove(object); // A failed resource object must not become a cache hit on the next attempt.
+            Fail("could not embed the game's executable resources (see logs/icon.log)");
         }
         if (!ico.empty())
             Log("icon: the game's own");
@@ -1267,8 +1267,7 @@ namespace
                 GameDesktopEntry(build.game.name, Slashes(build.exe), Slashes(build.options.out / "game_icon.png")));
         std::vector<std::string> objects = ObjectList(build);
         if (build.platform == "windows-x64")
-            if (std::string resources = ExecutableResources(build); !resources.empty())
-                objects.push_back(resources);
+            objects.push_back(ExecutableResources(build));
         // The link is fresh when its command (the kit's folder aside) and the content of the kit's libraries are the same.
         std::vector<std::string> command = ExpandTemplate(build, "link.args", objects);
         std::string key = CommandText(build, command);

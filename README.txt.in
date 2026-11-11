@@ -19,7 +19,13 @@ Windows 10 (1903 or later) or 11, x64:
   (about 750 MB once extracted); Arkeyan-Builder downloads and unpacks it itself, no other program is started for that;
 - about 5 GB free next to the game folder, 8 GB of RAM or more;
 - the first build takes 15-45 minutes depending on the CPU;
-- a GPU with a Vulkan 1.2 driver (any recent NVIDIA, AMD or Intel driver), else Direct3D 12.
+- a GPU with a Vulkan 1.2 driver (any recent NVIDIA, AMD or Intel driver), else Direct3D 12;
+- an Xbox 360 portal needs Windows' own WinUSB driver, once (nothing to download): Device Manager, right-click the portal
+  ("Spyro Portal", or an unknown device), Update driver, Browse my computer, Let me pick, Universal Serial Bus devices,
+  WinUsb Device, then unplug it and plug it in again. An Xbox One portal needs nothing;
+- a Wii, PlayStation or PC portal works on Windows' own driver or on WinUSB; on libusbK or libusb0 (Zadig), the launcher's
+  portal Test shows the way back (Device Manager, Uninstall device with "Attempt to remove the driver for this device",
+  then if it comes back: pnputil /enum-drivers and pnputil /delete-driver oemNN.inf /uninstall /force, as administrator).
 
 macOS (Apple silicon): Xcode with its Metal toolchain (xcodebuild -downloadComponent MetalToolchain on Xcode 26+).
 The launcher and Arkeyan-Builder are not notarized: on macOS 15 or later, the first time, try to open it, then

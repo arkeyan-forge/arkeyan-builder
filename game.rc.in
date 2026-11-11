@@ -11,8 +11,10 @@ FILETYPE 1
     {
         BLOCK "040904B0"
         {
-            VALUE "FileDescription", "@ARKEYAN_RUNTIME_NAME@"
-            VALUE "ProductName", "@ARKEYAN_RUNTIME_NAME@"
+            VALUE "CompanyName", "Arkeyan project"
+            VALUE "LegalCopyright", "Copyright (c) 2026 the SSARecomp authors; third-party notices apply"
+            VALUE "FileDescription", "Arkeyan runtime: @ARKEYAN_RUNTIME_NAME@"
+            VALUE "ProductName", "Arkeyan runtime: @ARKEYAN_RUNTIME_NAME@"
             VALUE "InternalName", "@ARKEYAN_RUNTIME_NAME@"
             VALUE "OriginalFilename", "@ARKEYAN_RUNTIME_NAME@.exe"
             VALUE "FileVersion", "@ARKEYAN_GAME_VERSION@"

@@ -23,7 +23,11 @@ int main(int argc, char** argv)
     std::string rc = VersionResource("Skylanders Giants", "Skylanders Giants", "0.8.2");
     Expect(rc, "FILEVERSION 0,8,2,0");
     Expect(rc, "PRODUCTVERSION 0,8,2,0");
-    Expect(rc, "            VALUE \"FileDescription\", \"Skylanders Giants\"");
+    Expect(rc, "            VALUE \"CompanyName\", \"Arkeyan project\"");
+    Expect(rc, "            VALUE \"LegalCopyright\", \"Copyright (c) 2026 the SSARecomp authors; third-party notices "
+               "apply\"");
+    Expect(rc, "            VALUE \"FileDescription\", \"Arkeyan runtime: Skylanders Giants\"");
+    Expect(rc, "            VALUE \"ProductName\", \"Arkeyan runtime: Skylanders Giants\"");
     Expect(rc, "            VALUE \"FileVersion\", \"0.8.2\"");
     Expect(rc, "            VALUE \"OriginalFilename\", \"Skylanders Giants.exe\"");
     Expect(VersionResource("Skylanders", "Skylanders Spyro's Adventure", "1.2.3.4"), "FILEVERSION 1,2,3,4");

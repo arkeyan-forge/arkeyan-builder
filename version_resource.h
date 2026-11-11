@@ -25,7 +25,10 @@ inline std::string VersionResource(const std::string& name, const std::string& r
            "    {\n"
            "        BLOCK \"040904B0\"\n"
            "        {\n"
-           "            VALUE \"FileDescription\", \"" +
+           "            VALUE \"CompanyName\", \"Arkeyan project\"\n"
+           "            VALUE \"LegalCopyright\", \"Copyright (c) 2026 the SSARecomp authors; third-party notices "
+           "apply\"\n"
+           "            VALUE \"FileDescription\", \"Arkeyan runtime: " +
            name +
            "\"\n"
            "            VALUE \"FileVersion\", \"" +
@@ -37,7 +40,7 @@ inline std::string VersionResource(const std::string& name, const std::string& r
            "            VALUE \"OriginalFilename\", \"" +
            runtime +
            ".exe\"\n"
-           "            VALUE \"ProductName\", \"" +
+           "            VALUE \"ProductName\", \"Arkeyan runtime: " +
            name +
            "\"\n"
            "            VALUE \"ProductVersion\", \"" +

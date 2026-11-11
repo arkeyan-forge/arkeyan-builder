@@ -4,8 +4,6 @@
 # the same static FFmpeg as the game's; ARKEYAN_FFMPEG=OFF builds it without, and --menu-music then fails).
 if(WIN32)
     # UTF-8 as the process code page, as for the game (SSARecomp.manifest); the kit's version in the exe's details.
-    set(ARKEYAN_KIT_VERSION "0.0.0" CACHE STRING "The kit's version, in Arkeyan-Builder.exe's VERSIONINFO (tools/make_kit.sh)")
-    string(REPLACE "." "," SKYBUILD_VERSION_PARTS "${ARKEYAN_KIT_VERSION}.0")
     configure_file(arkeyan-builder.rc.in arkeyan-builder.rc @ONLY)
     set(SKYBUILD_PLATFORM ${CMAKE_SOURCE_DIR}/runtime/platform/platform_win32.cpp ${CMAKE_CURRENT_BINARY_DIR}/arkeyan-builder.rc)
 else()

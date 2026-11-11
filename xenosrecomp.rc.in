@@ -11,11 +11,13 @@ FILETYPE 1
     {
         BLOCK "040904B0"
         {
-            VALUE "FileDescription", "Xenos shader translator of the Skylanders kit"
+            VALUE "CompanyName", "Arkeyan project (kit distribution)"
+            VALUE "LegalCopyright", "Copyright (c) 2025 hedge-dev and contributors; see licenses/"
+            VALUE "FileDescription", "XenosRecomp shader translator in the Arkeyan player kit"
             VALUE "FileVersion", "@VERSION@"
             VALUE "InternalName", "XenosRecomp"
             VALUE "OriginalFilename", "XenosRecomp.exe"
-            VALUE "ProductName", "Skylanders kit"
+            VALUE "ProductName", "Arkeyan player kit (XenosRecomp)"
             VALUE "ProductVersion", "@VERSION@"
         }
     }

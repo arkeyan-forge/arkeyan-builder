@@ -12,11 +12,13 @@ FILETYPE 1
     {
         BLOCK "040904B0"
         {
-            VALUE "FileDescription", "Arkeyan-Builder"
+            VALUE "CompanyName", "Arkeyan project"
+            VALUE "LegalCopyright", "Copyright (c) 2026 the SSARecomp authors"
+            VALUE "FileDescription", "Arkeyan player kit build driver"
             VALUE "FileVersion", "@ARKEYAN_KIT_VERSION@"
             VALUE "InternalName", "Arkeyan-Builder"
             VALUE "OriginalFilename", "Arkeyan-Builder.exe"
-            VALUE "ProductName", "Skylanders kit"
+            VALUE "ProductName", "Arkeyan player kit"
             VALUE "ProductVersion", "@ARKEYAN_KIT_VERSION@"
         }
     }

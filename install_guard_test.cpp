@@ -283,6 +283,39 @@ static void TestMainFailure(Build& build)
     CHECK(!fs::exists(build.work / "movies/done.txt"));
 }
 
+static void TestExecutableResources(Build& build)
+{
+    build.vars["CXX"] = Slashes(build.options.kit / "compiler/bin/clang++");
+    build.kit["game_version." + build.game.id] = "1.2.3";
+    // Cache invented icon files so this check reads no disc artwork and only exercises resource compilation.
+    for (const char* extension : { "png", "ico", "icns" })
+        Put(build.options.out / (std::string("game_icon.") + extension), "synthetic icon\n");
+    Put(build.work / "icon/game_icon.key", DiscStamp(build) + "recipe=2\n");
+    fs::path object = build.work / "icon/game_icon.o";
+    Put(object, "old resource\n");
+    int calls = 0;
+    child = [&](const std::vector<std::string>& args, const RunOptions& run) {
+        CHECK(fs::path(args[0]).stem().string().find("windres") != std::string::npos);
+        ++calls;
+        if (calls == 1)
+        {
+            Put(run.cwd / "game_icon.o", "partial resource\n");
+            return 1;
+        }
+        if (calls == 3)
+            Put(run.cwd / "game_icon.o", "complete resource\n");
+        return 0;
+    };
+    CHECK(Failed([&] { ExecutableResources(build); }).find("executable resources") != std::string::npos);
+    CHECK(!fs::exists(object));
+    // Success without producing an object is also an error; neither failure may become a cached success.
+    CHECK(Failed([&] { ExecutableResources(build); }).find("executable resources") != std::string::npos);
+    CHECK(!fs::exists(object));
+    CHECK(ExecutableResources(build) == "icon/game_icon.o");
+    CHECK(ExecutableResources(build) == "icon/game_icon.o");
+    CHECK(calls == 3);
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2)
@@ -296,6 +329,7 @@ int main(int argc, char** argv)
         TestTranslation(build);
         TestMovies(build);
         TestMainFailure(build);
+        TestExecutableResources(build);
         fs::remove_all(root);
     }
     catch (const std::exception& error)

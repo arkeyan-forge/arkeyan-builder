@@ -1,0 +1,28 @@
+// Our kit distribution of XenonRecomp. The version identifies the kit, not an upstream release.
+1 24 "SSARecomp.manifest"
+
+1 VERSIONINFO
+FILEVERSION @SKYBUILD_VERSION_PARTS@
+PRODUCTVERSION @SKYBUILD_VERSION_PARTS@
+FILEOS 0x40004
+FILETYPE 1
+{
+    BLOCK "StringFileInfo"
+    {
+        BLOCK "040904B0"
+        {
+            VALUE "CompanyName", "Arkeyan project (kit distribution)"
+            VALUE "LegalCopyright", "Copyright (c) 2025 hedge-dev and contributors; see licenses/"
+            VALUE "FileDescription", "XenonRecomp PowerPC translator in the Arkeyan player kit"
+            VALUE "FileVersion", "@ARKEYAN_KIT_VERSION@"
+            VALUE "InternalName", "XenonRecomp"
+            VALUE "OriginalFilename", "XenonRecomp.exe"
+            VALUE "ProductName", "Arkeyan player kit (XenonRecomp)"
+            VALUE "ProductVersion", "@ARKEYAN_KIT_VERSION@"
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x409, 0x4B0
+    }
+}
