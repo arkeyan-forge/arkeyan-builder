@@ -1,3 +1,5 @@
+> **This repository is archived.** Its content now lives in [arkeyan-forge/forge](https://github.com/arkeyan-forge/forge) (one repository for the whole project, since 2026-11-12).
+
 # arkeyan-builder: the player kit's builder (SSABuild, then SkyBuild, before 0.8.0)
 
 > **Purpose:** what this repository is, how it fits the forge, and its licence · **Status:** current · **Tags:** none
